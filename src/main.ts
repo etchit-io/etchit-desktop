@@ -1,9 +1,12 @@
-// etchit library viewer — desktop frontend (Phase 1)
+// etchit desktop frontend.
 //
-// Mirrors tools/library.html in the etchit-android-v3 repo, ported to
-// TypeScript + Vite. Read-only: decrypts on-chain library entries and
-// renders them. Phase 2 will replace ant-cli copy actions with in-app
-// fetch via FFI calls into Rust.
+// Library viewer ported from tools/library.html in etchit-android-v3.
+// Phase 2 wires the Tauri Rust backend (ant-ffi) so content can be
+// fetched in-app instead of shelling out to ant-cli.
+
+import { invoke } from "@tauri-apps/api/core";
+
+const inTauri = typeof (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== "undefined";
 
 const VERSION_BYTE = 0x01;
 const NONCE_LEN = 12;
@@ -343,3 +346,27 @@ if (!window.ethereum) {
   setStatus("connectStatus", "No browser wallet detected — expand the manual entry section below.", "err");
   $<HTMLButtonElement>("connect").disabled = true;
 }
+
+// ── Autonomi network bridge (Phase 2a) ───────────────────────────
+
+function setNetStatus(msg: string, cls: "ok" | "err" | "warn" | "" = ""): void {
+  const bar = $("network");
+  $("netStatus").textContent = msg;
+  bar.className = "net-bar" + (cls ? ` ${cls}` : "");
+}
+
+async function autoConnect(): Promise<void> {
+  if (!inTauri) {
+    setNetStatus("not running inside Tauri (no FFI)", "warn");
+    return;
+  }
+  setNetStatus("connecting…", "warn");
+  try {
+    const peers = await invoke<number>("connect", {});
+    setNetStatus(`${peers} peers`, "ok");
+  } catch (e) {
+    setNetStatus(`failed: ${(e as Error).message ?? String(e)}`, "err");
+  }
+}
+
+void autoConnect();

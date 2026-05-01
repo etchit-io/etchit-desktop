@@ -11,9 +11,11 @@
     <main>
       <h1>etchit library viewer</h1>
       <p class="sub">
-        Decrypts your on-chain library entries client-side and lists them with the matching
-        <code>ant-cli</code> command per entry. Nothing leaves this app except the BlockScout HTTP query.
+        Decrypts your on-chain library entries client-side. Once connected to the Autonomi network,
+        entries are fetchable in-app with no <code>ant-cli</code> shell-out.
       </p>
+
+      <div id="network" class="net-bar">Network: <span id="netStatus">starting…</span></div>
 
       <div class="controls" style="margin-top: 0; margin-bottom: 8px;">
         <button id="connect">Connect wallet</button>
