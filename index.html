@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>etchit library viewer</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <main>
+      <h1>etchit library viewer</h1>
+      <p class="sub">
+        Decrypts your on-chain library entries client-side and lists them with the matching
+        <code>ant-cli</code> command per entry. Nothing leaves this app except the BlockScout HTTP query.
+      </p>
+
+      <div class="controls" style="margin-top: 0; margin-bottom: 8px;">
+        <button id="connect">Connect wallet</button>
+        <span id="connectStatus" class="status"></span>
+      </div>
+      <p class="sub" style="font-size: 12px; margin-top: 4px;">
+        Uses your browser-extension wallet to sign the same library-derive message the mobile app uses,
+        so the key is recreated automatically — no copy-paste.
+      </p>
+
+      <details id="manualSection">
+        <summary>Or enter key manually</summary>
+        <label for="wallet">Wallet address</label>
+        <input id="wallet" type="text" placeholder="0x… (40 hex chars)" autocomplete="off" spellcheck="false" />
+
+        <label for="key">Library key (Settings → Library → Back up library key)</label>
+        <div style="display: flex; gap: 8px;">
+          <input id="key" type="password" placeholder="64 hex chars" autocomplete="new-password" spellcheck="false" style="flex: 1;" />
+          <button id="toggleKey" type="button" class="outlined" style="padding: 0 10px;">Show</button>
+        </div>
+        <div class="controls" style="margin-top: 12px;">
+          <button id="decodeManual">Decode library</button>
+        </div>
+      </details>
+
+      <details>
+        <summary>Advanced</summary>
+        <label for="indexer">Indexer base URL</label>
+        <input id="indexer" type="text" value="https://arbitrum.blockscout.com/api" autocomplete="off" spellcheck="false" />
+      </details>
+
+      <div class="controls" style="margin-top: 18px;">
+        <span id="status" class="status"></span>
+      </div>
+
+      <div class="results" id="results"></div>
+
+      <p class="footer">
+        Spec: <code>docs/library-format-v1.md</code>. Decrypt logic mirrors the Kotlin reference
+        implementation; both round-trip the same wire format.
+      </p>
+    </main>
+  </body>
+</html>

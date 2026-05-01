@@ -1,0 +1,172 @@
+:root {
+  --ink: #0a0a0a;
+  --ink-2: #141414;
+  --ink-3: #1c1c1c;
+  --bone: #f5f2eb;
+  --ash: #8a8a8a;
+  --copper: #c9732b;
+  --green: #9ece6a;
+  --red: #f7768e;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--ink);
+  color: var(--bone);
+}
+
+body {
+  font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+  padding: 32px 16px;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+p.sub {
+  color: var(--ash);
+  margin: 0 0 24px;
+  font-size: 14px;
+}
+
+label {
+  display: block;
+  margin: 14px 0 4px;
+  font-size: 12px;
+  color: var(--ash);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+input[type=text], input[type=password] {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--ink-3);
+  color: var(--bone);
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  font: inherit;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+input[type=text]:focus, input[type=password]:focus {
+  outline: 0;
+  border-color: var(--copper);
+}
+
+button {
+  padding: 10px 18px;
+  background: var(--copper);
+  color: var(--ink);
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled { opacity: 0.5; cursor: default; }
+
+button.outlined {
+  background: transparent;
+  color: var(--bone);
+  border: 1px solid #2a2a2a;
+  font-weight: 400;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+button.outlined:hover { border-color: var(--copper); }
+
+.controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 18px;
+}
+
+details { margin-top: 14px; }
+
+details summary {
+  color: var(--ash);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.status {
+  margin-top: 18px;
+  font-size: 13px;
+  min-height: 1.4em;
+}
+
+.status.err { color: var(--red); }
+.status.ok { color: var(--green); }
+
+.results { margin-top: 24px; }
+
+.row {
+  background: var(--ink-2);
+  border: 1px solid #1f1f1f;
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+}
+
+.row .title {
+  font-size: 14px;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.row .addr {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--ash);
+  margin: 6px 0 10px;
+  word-break: break-all;
+}
+
+.row .actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.row.bookmark .title::before {
+  content: "★ ";
+  color: var(--copper);
+}
+
+.empty {
+  color: var(--ash);
+  font-size: 13px;
+  padding: 20px 0;
+  text-align: center;
+}
+
+.footer {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid #1a1a1a;
+  color: var(--ash);
+  font-size: 12px;
+}
+
+code {
+  background: var(--ink-3);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
