@@ -84,17 +84,45 @@
         </div>
       </details>
 
-      <details>
-        <summary>Advanced</summary>
-        <label for="indexer">Indexer base URL</label>
-        <input id="indexer" type="text" value="https://arbitrum.blockscout.com/api" autocomplete="off" spellcheck="false" />
-      </details>
-
       <div class="controls" style="margin-top: 18px;">
         <span id="status" class="status"></span>
       </div>
 
       <div class="results" id="results"></div>
+
+      <h2 class="section-title">Settings <span class="info" data-tip="Per-wallet, persisted in this app's local storage. Bootstrap peers and indexer URL are also configurable on mobile.">i</span></h2>
+
+      <details class="settings-block">
+        <summary>Bootstrap peers</summary>
+        <p class="sub">One peer per line. Format: <code>ip:port</code> or full multiaddr. Leave empty to use the default Autonomi mainnet list. Saving reconnects.</p>
+        <textarea id="bootstrapPeers" rows="6" placeholder="207.148.94.42:10000&#10;45.77.50.10:10000&#10;…"></textarea>
+        <div class="controls" style="margin-top: 12px;">
+          <button id="savePeersBtn">Save and reconnect</button>
+          <button id="resetPeersBtn" class="outlined">Reset to defaults</button>
+          <span id="peersStatus" class="status"></span>
+        </div>
+      </details>
+
+      <details class="settings-block">
+        <summary>Library indexer</summary>
+        <p class="sub">Etherscan-V1-compatible base URL. Default is keyless BlockScout.</p>
+        <input id="indexer" type="text" value="https://arbitrum.blockscout.com/api" autocomplete="off" spellcheck="false" />
+        <div class="controls" style="margin-top: 12px;">
+          <button id="saveIndexerBtn">Save</button>
+          <span id="indexerStatus" class="status"></span>
+        </div>
+      </details>
+
+      <details class="settings-block">
+        <summary>Library key — backup / restore</summary>
+        <p class="sub">The 32-byte AES key derived from your wallet. Shared across mobile + desktop + web viewer for the same wallet. Anyone with this key plus your wallet address can read your library.</p>
+        <div class="controls" style="margin-top: 6px;">
+          <button id="showLibraryKeyBtn">Show library key</button>
+          <button id="forgetLibraryBtn" class="outlined">Forget on this device</button>
+          <span id="libraryKeyStatus" class="status"></span>
+        </div>
+        <div id="libraryKeyOutput" style="margin-top: 10px;"></div>
+      </details>
 
     </main>
   </body>

@@ -373,6 +373,24 @@ label.checkbox {
 
 label.checkbox input { margin: 0; }
 
+.settings-block {
+  background: var(--ink-2);
+  border: 1px solid #1f1f1f;
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin: 8px 0;
+}
+
+.settings-block summary {
+  color: var(--bone);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-block p.sub {
+  margin: 8px 0 10px;
+}
+
 .info {
   display: inline-flex;
   width: 16px;

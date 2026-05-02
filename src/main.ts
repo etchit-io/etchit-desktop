@@ -595,7 +595,7 @@ function render(entries: LibraryEntry[]): void {
 let currentLibraryEntries: LibraryEntry[] = [];
 
 async function runDecode(wallet: string, keyBytes: Uint8Array): Promise<void> {
-  const indexer = $<HTMLInputElement>("indexer").value.trim();
+  const indexer = readSavedIndexer() ?? $<HTMLInputElement>("indexer").value.trim();
   setStatus("status", "Fetching from indexer…");
   $("results").innerHTML = "";
   const entries = await fetchAndDecode(wallet, keyBytes, indexer);
@@ -717,6 +717,38 @@ const PEER_REFRESH_MS = 5_000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// Same default peer list mirrored from Rust DEFAULT_PEERS (kept in sync
+// for the Settings textarea hint). User saves a comma/newline-separated
+// list; we pass it through to the FFI as multiaddrs.
+const DEFAULT_BOOTSTRAP_TEXT = [
+  "207.148.94.42:10000",
+  "45.77.50.10:10000",
+  "66.135.23.83:10000",
+  "149.248.9.2:10000",
+  "49.12.119.240:10000",
+  "5.161.25.133:10000",
+  "18.228.202.183:10000",
+].join("\n");
+
+function normalizeMultiaddr(addr: string): string {
+  if (addr.startsWith("/")) return addr;
+  const parts = addr.split(":");
+  if (parts.length === 2) return `/ip4/${parts[0]}/udp/${parts[1]}/quic`;
+  return addr;
+}
+
+function readSavedPeers(): string[] | null {
+  const raw = localStorage.getItem("etchit:bootstrap-peers:v1");
+  if (!raw || !raw.trim()) return null;
+  const lines = raw.split("\n").map((s) => s.trim()).filter(Boolean).map(normalizeMultiaddr);
+  return lines.length ? lines : null;
+}
+
+function readSavedIndexer(): string | null {
+  const v = localStorage.getItem("etchit:indexer-url:v1");
+  return v && v.trim() ? v.trim() : null;
+}
+
 async function autoConnect(): Promise<void> {
   if (!inTauri) {
     setNetStatus("not running inside Tauri (no FFI)", "warn");
@@ -724,7 +756,8 @@ async function autoConnect(): Promise<void> {
   }
   setNetStatus("connecting…", "warn");
   try {
-    await invoke<number>("connect", {});
+    const saved = readSavedPeers();
+    await invoke<number>("connect", saved ? { peers: saved } : {});
   } catch (e) {
     setNetStatus(`failed: ${(e as Error).message ?? String(e)}`, "err");
     return;
@@ -1530,6 +1563,126 @@ $("walletBtn").addEventListener("click", () => {
 });
 
 setInterval(() => { void refreshAntBalance(); }, 30_000);
+
+// ── Settings (Phase 3d) ──────────────────────────────────────────
+
+function initSettingsUI(): void {
+  // Bootstrap peers
+  const peersInput = $<HTMLTextAreaElement>("bootstrapPeers");
+  const savedPeers = localStorage.getItem("etchit:bootstrap-peers:v1");
+  peersInput.value = savedPeers ?? DEFAULT_BOOTSTRAP_TEXT;
+
+  const setPeersStatus = (msg: string, cls: "ok" | "err" | "warn" | "" = "") => {
+    const el = $("peersStatus");
+    el.textContent = msg;
+    el.className = "status" + (cls ? ` ${cls}` : "");
+  };
+
+  $("savePeersBtn").addEventListener("click", async () => {
+    const v = peersInput.value.trim();
+    if (v && v !== DEFAULT_BOOTSTRAP_TEXT) {
+      localStorage.setItem("etchit:bootstrap-peers:v1", v);
+    } else {
+      localStorage.removeItem("etchit:bootstrap-peers:v1");
+    }
+    setPeersStatus("saved — reconnecting…", "warn");
+    try {
+      if (inTauri) await invoke("disconnect");
+      await autoConnect();
+      setPeersStatus("reconnected", "ok");
+    } catch (e) {
+      setPeersStatus(`reconnect failed: ${(e as Error).message ?? String(e)}`, "err");
+    }
+  });
+
+  $("resetPeersBtn").addEventListener("click", () => {
+    peersInput.value = DEFAULT_BOOTSTRAP_TEXT;
+    localStorage.removeItem("etchit:bootstrap-peers:v1");
+    setPeersStatus("reset to defaults — click Save to reconnect.", "warn");
+  });
+
+  // Indexer URL
+  const indexerInput = $<HTMLInputElement>("indexer");
+  const savedIndexer = readSavedIndexer();
+  if (savedIndexer) indexerInput.value = savedIndexer;
+
+  const setIndexerStatus = (msg: string, cls: "ok" | "err" | "warn" | "" = "") => {
+    const el = $("indexerStatus");
+    el.textContent = msg;
+    el.className = "status" + (cls ? ` ${cls}` : "");
+  };
+
+  $("saveIndexerBtn").addEventListener("click", () => {
+    const v = indexerInput.value.trim();
+    if (!/^https?:\/\//.test(v)) {
+      setIndexerStatus("URL must start with http:// or https://", "err");
+      return;
+    }
+    localStorage.setItem("etchit:indexer-url:v1", v);
+    setIndexerStatus("saved", "ok");
+  });
+
+  // Library key — backup / restore
+  const libKeyOut = $("libraryKeyOutput");
+  const setLibKeyStatus = (msg: string, cls: "ok" | "err" | "warn" | "" = "") => {
+    const el = $("libraryKeyStatus");
+    el.textContent = msg;
+    el.className = "status" + (cls ? ` ${cls}` : "");
+  };
+
+  $("showLibraryKeyBtn").addEventListener("click", async () => {
+    setLibKeyStatus("");
+    libKeyOut.innerHTML = "";
+    try {
+      const { key } = await ensureLibraryKey();
+      const hex = bytesToHex(key);
+
+      const block = document.createElement("div");
+      block.className = "fetch-result";
+
+      const warn = document.createElement("div");
+      warn.className = "fetch-meta";
+      warn.style.color = "var(--copper)";
+      warn.style.marginBottom = "6px";
+      warn.textContent = "Treat this like a password. Anyone with this key + your wallet address can read your library.";
+      block.appendChild(warn);
+
+      const code = document.createElement("div");
+      code.style.fontFamily = "ui-monospace, Menlo, Consolas, monospace";
+      code.style.fontSize = "12px";
+      code.style.wordBreak = "break-all";
+      code.style.padding = "8px 10px";
+      code.style.background = "var(--ink)";
+      code.style.borderRadius = "4px";
+      code.textContent = hex;
+      block.appendChild(code);
+
+      const copyBtn = document.createElement("button");
+      copyBtn.className = "outlined";
+      copyBtn.textContent = "Copy key";
+      copyBtn.style.marginTop = "8px";
+      copyBtn.onclick = () => {
+        navigator.clipboard.writeText(hex);
+        setLibKeyStatus("copied", "ok");
+      };
+      block.appendChild(copyBtn);
+
+      libKeyOut.appendChild(block);
+    } catch (e) {
+      setLibKeyStatus(`failed: ${(e as Error).message ?? String(e)}`, "err");
+    }
+  });
+
+  $("forgetLibraryBtn").addEventListener("click", () => {
+    walletKeys = null;
+    libKeyOut.innerHTML = "";
+    currentLibraryEntries = [];
+    $("results").innerHTML = "";
+    setLibKeyStatus("forgotten — keys re-derive on next sign", "ok");
+  });
+}
+
+initSettingsUI();
 
 // Refresh on load + whenever AppKit's account state changes (covers
 // late-loading persisted sessions and live disconnects).
