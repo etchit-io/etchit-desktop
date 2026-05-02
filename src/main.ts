@@ -68,27 +68,82 @@ const TAG_LEN = 16;
 const BUCKETS = [1024, 4096, 16384] as const;
 const RECIPIENT_PREFIX = new TextEncoder().encode("etchit-library-v1/recipient");
 
-// Spec §4.1 — byte-exact (137 bytes UTF-8). Same string the mobile app signs.
+// =================================================================
+//  FROZEN — library v1 protocol message (cross-client contract)
+// =================================================================
+// Locked in docs/library-format-v1.md (§4.1). Mobile (Kotlin),
+// web viewer (JS), Python CLI, and this client must all sign the
+// SAME bytes — otherwise the derived key differs and cross-device
+// library sync breaks.
+//
+// 137 bytes UTF-8.
+// SHA-256: 5163bfeff8f6fa44563730938abbe6a23b35aa890868754e22ff15af7666c0d5
+// =================================================================
 const SIGN_MESSAGE =
   "etchit library v1\n\n" +
   "Sign this message to derive your encrypted-library key. " +
   "This signature does NOT authorize any transaction or transfer.";
 
-// Distinct message for the private-etch storage key. Desktop-specific —
-// mobile uses Android Keystore for at-rest encryption and never signs
-// this. Distinct semantics so a user signing one isn't unknowingly
-// authorizing the other.
+// =================================================================
+//  FROZEN — DO NOT EDIT THE BYTES OF THIS MESSAGE
+// =================================================================
+// The wallet signature over these exact bytes is the IKM for HKDF.
+// Any edit (whitespace, punctuation, case, anything) changes the
+// signature, changes the derived key, and silently makes every
+// existing user's private etches undecryptable. There is no
+// recovery — the data-maps are gone.
+//
+// To change the wording: bump the version (`v2`) AND introduce a
+// migration path that decrypts old entries with the v1 key and
+// re-encrypts with the v2 key, OR keeps both keys cached.
+//
+// 188 bytes UTF-8.
+// SHA-256: 761f194f8756aba672cd7c502a5a3aaf2d4908c5cf9420a702090d4992febc7d
+// =================================================================
 const SIGN_MESSAGE_PRIVATE =
   "etchit private storage v1\n\n" +
-  "Sign this message to derive a key that encrypts your private-etch " +
-  "data-maps on this device. This signature does NOT authorize any " +
-  "transaction or transfer.";
+  "Sign this message to derive the key that encrypts and decrypts " +
+  "your private etches on this device. This signature does NOT " +
+  "authorize any transaction or transfer.";
 
-// Spec §4.3 — HKDF info string for the AEAD key derivation.
+// FROZEN — Spec §4.3 (cross-client). Mobile, web viewer, and Python
+// CLI hash the same string. Any edit silently breaks library sync.
 const HKDF_INFO = new TextEncoder().encode("etchit-library/v1/aead-key");
-// Independent key for at-rest encryption of private etch data-maps.
-// Different info string so backing up the library key doesn't leak the
-// stored data-maps (and vice-versa).
+
+// Defence-in-depth: hash the frozen sign messages at startup and abort
+// loudly if either has drifted. A silent edit to either string would
+// silently change the derived keys and corrupt user data; this turns
+// that into a hard failure instead.
+const SIGN_MESSAGE_SHA256 = "5163bfeff8f6fa44563730938abbe6a23b35aa890868754e22ff15af7666c0d5";
+const SIGN_MESSAGE_PRIVATE_SHA256 = "761f194f8756aba672cd7c502a5a3aaf2d4908c5cf9420a702090d4992febc7d";
+
+async function sha256Hex(s: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
+  return Array.from(digest).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function assertSignMessagesPinned(): Promise<void> {
+  const lib = await sha256Hex(SIGN_MESSAGE);
+  if (lib !== SIGN_MESSAGE_SHA256) {
+    throw new Error(
+      `SIGN_MESSAGE bytes drifted from spec (got ${lib}, expected ${SIGN_MESSAGE_SHA256}). ` +
+      `Library cross-device sync is broken. Revert the message or bump the protocol version.`,
+    );
+  }
+  const priv = await sha256Hex(SIGN_MESSAGE_PRIVATE);
+  if (priv !== SIGN_MESSAGE_PRIVATE_SHA256) {
+    throw new Error(
+      `SIGN_MESSAGE_PRIVATE bytes drifted from spec (got ${priv}, expected ${SIGN_MESSAGE_PRIVATE_SHA256}). ` +
+      `Existing private etches are now undecryptable. Revert the message or bump to v2 with a migration path.`,
+    );
+  }
+}
+
+void assertSignMessagesPinned();
+// FROZEN — desktop-local. Distinct from HKDF_INFO so backing up the
+// library key doesn't leak data-maps and vice-versa. Any edit silently
+// makes existing private etches undecryptable. Bump v1 -> v2 + add a
+// migration if you need to change.
 const HKDF_INFO_PRIVATE_STORAGE = new TextEncoder().encode("etchit-private-storage/v1/data-map-key");
 
 type LibraryEntry = {
@@ -319,7 +374,6 @@ async function ensureLibraryKey(): Promise<{ wallet: string; key: Uint8Array }> 
   if (walletKeys?.libraryKey) return { wallet: walletKeys.wallet, key: walletKeys.libraryKey };
   const key = await signAndDerive(SIGN_MESSAGE, HKDF_INFO, "sign the library-derive message in your wallet");
   walletKeys = { ...(walletKeys ?? { wallet: (await ensureWalletConnected()).wallet }), libraryKey: key };
-  renderPrivateEtches();
   return { wallet: walletKeys.wallet, key };
 }
 
@@ -327,7 +381,6 @@ async function ensureStorageKey(): Promise<{ wallet: string; key: Uint8Array }> 
   if (walletKeys?.storageKey) return { wallet: walletKeys.wallet, key: walletKeys.storageKey };
   const key = await signAndDerive(SIGN_MESSAGE_PRIVATE, HKDF_INFO_PRIVATE_STORAGE, "sign the private-storage message in your wallet");
   walletKeys = { ...(walletKeys ?? { wallet: (await ensureWalletConnected()).wallet }), storageKey: key };
-  renderPrivateEtches();
   return { wallet: walletKeys.wallet, key };
 }
 
@@ -815,8 +868,15 @@ async function decryptDataMap(storageKey: Uint8Array, cipherHex: string): Promis
   const nonce = blob.slice(0, 12);
   const ct = blob.slice(12);
   const aesKey = await crypto.subtle.importKey("raw", storageKey, { name: "AES-GCM" }, false, ["decrypt"]);
-  const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce }, aesKey, ct));
-  return new TextDecoder().decode(pt);
+  try {
+    const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce }, aesKey, ct));
+    return new TextDecoder().decode(pt);
+  } catch {
+    throw new Error(
+      "Could not decrypt data-map — this entry was likely created with a different storage key. " +
+      "Delete it (data-map is gone) and re-etch.",
+    );
+  }
 }
 
 function newId(): string {
@@ -1355,11 +1415,26 @@ setInterval(() => { void refreshAntBalance(); }, 30_000);
 
 // Refresh on load + whenever AppKit's account state changes (covers
 // late-loading persisted sessions and live disconnects).
+//
+// subscribeAccount fires on every account-state update — including
+// balance refreshes — so re-rendering the list unconditionally would
+// orphan in-flight fetch result nodes. Only re-render when the wallet
+// identity actually changes.
+let lastRenderedWallet: string | null = null;
+function maybeRerenderPrivate(): void {
+  const wallet = knownWallet();
+  if (wallet !== lastRenderedWallet) {
+    lastRenderedWallet = wallet;
+    renderPrivateEtches();
+  }
+}
+
 renderPrivateEtches();
+lastRenderedWallet = knownWallet();
 void refreshWalletBar();
 appKit.subscribeAccount(() => {
   void refreshWalletBar();
-  renderPrivateEtches();
+  maybeRerenderPrivate();
 });
 
 function appendError(parent: HTMLElement, msg: string): void {
