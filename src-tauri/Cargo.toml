@@ -24,6 +24,8 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-log = "0.2"
 # Path dep into the Android repo's vendored Autonomi FFI crate. Cross-repo
 # path is fragile but matches dev layout (~/Desktop/etchit-android-v3/ next
 # to ~/Desktop/etchit-desktop/). Replace with a git dep once ant-sdk is

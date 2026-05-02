@@ -21,6 +21,7 @@ const SESSION_BUDGET_ATTO = 20_000_000_000_000_000_000n; // 20 ANT
 const ERC20_ABI = [
   "function allowance(address owner, address spender) view returns (uint256)",
   "function approve(address spender, uint256 amount) returns (bool)",
+  "function balanceOf(address owner) view returns (uint256)",
 ];
 const VAULT_ABI = [
   "function payForQuotes(tuple(address rewardsAddress, uint256 amount, bytes32 quoteHash)[] payments)",
@@ -54,6 +55,10 @@ const appKit = createAppKit({
     url: "https://etchit.io",
     icons: ["https://etchit.io/icon.svg"],
   },
+  // Surface ANT balance inside the AppKit Manage modal alongside ETH.
+  tokens: {
+    "eip155:42161": { address: "0xa78d8321B20c4Ef90eCd72f2588AA985A4BDb684" },
+  },
   features: { analytics: false, email: false, socials: false },
 });
 
@@ -69,8 +74,22 @@ const SIGN_MESSAGE =
   "Sign this message to derive your encrypted-library key. " +
   "This signature does NOT authorize any transaction or transfer.";
 
+// Distinct message for the private-etch storage key. Desktop-specific —
+// mobile uses Android Keystore for at-rest encryption and never signs
+// this. Distinct semantics so a user signing one isn't unknowingly
+// authorizing the other.
+const SIGN_MESSAGE_PRIVATE =
+  "etchit private storage v1\n\n" +
+  "Sign this message to derive a key that encrypts your private-etch " +
+  "data-maps on this device. This signature does NOT authorize any " +
+  "transaction or transfer.";
+
 // Spec §4.3 — HKDF info string for the AEAD key derivation.
 const HKDF_INFO = new TextEncoder().encode("etchit-library/v1/aead-key");
+// Independent key for at-rest encryption of private etch data-maps.
+// Different info string so backing up the library key doesn't leak the
+// stored data-maps (and vice-versa).
+const HKDF_INFO_PRIVATE_STORAGE = new TextEncoder().encode("etchit-private-storage/v1/data-map-key");
 
 type LibraryEntry = {
   addr: string;
@@ -223,14 +242,14 @@ async function fetchAndDecode(walletAddr: string, keyMaterial: Uint8Array, index
 
 // ── HKDF (§4.3) — derive 32-byte AES key from a wallet signature ─
 
-async function deriveLibraryKey(signatureHex: string): Promise<Uint8Array> {
+async function deriveKeyFromSig(signatureHex: string, info: Uint8Array): Promise<Uint8Array> {
   // signatureHex is 0x-prefixed (r||s||v), 65 bytes total. Spec uses (r||s) as IKM.
   const sigBytes = hexToBytes(signatureHex);
   if (sigBytes.length !== 65) throw new Error(`unexpected sig length ${sigBytes.length}`);
   const ikm = sigBytes.slice(0, 64);
   const ikmKey = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: HKDF_INFO },
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info },
     ikmKey,
     256,
   );
@@ -266,26 +285,55 @@ async function waitForAppKitConnection(): Promise<string> {
   });
 }
 
-// Cached library context — populated after Connect wallet succeeds and
-// reused for library writes (auto-add after etch).
-let currentLibrary: { wallet: string; key: Uint8Array } | null = null;
+// Cached wallet-derived keys. Library and private-storage are derived
+// from independent personal_sign calls (different messages) so a user
+// who signs one isn't unknowingly authorizing the other.
+let walletKeys: { wallet: string; libraryKey?: Uint8Array; storageKey?: Uint8Array } | null = null;
 
-async function connectAndDeriveKey(): Promise<{ wallet: string; key: Uint8Array }> {
+async function ensureWalletConnected(): Promise<{ wallet: string; provider: Eip1193Provider }> {
   const wallet = await waitForAppKitConnection();
-  const walletProvider = appKit.getWalletProvider() as Eip1193Provider | undefined;
-  if (!walletProvider) throw new Error("Wallet connected but no provider available.");
-  // Sign via raw EIP-1193 personal_sign — ethers' BrowserProvider would
-  // multiplex extra eth_chainId/eth_accounts queries through the same
-  // WalletConnect channel, which has triggered "Invalid Id" responses
-  // on MetaMask Mobile.
-  const messageHex = "0x" + bytesToHex(new TextEncoder().encode(SIGN_MESSAGE));
-  const sigHex = (await walletProvider.request({
-    method: "personal_sign",
-    params: [messageHex, wallet],
-  })) as string;
-  const key = await deriveLibraryKey(sigHex);
-  currentLibrary = { wallet, key };
-  return { wallet, key };
+  const provider = appKit.getWalletProvider() as Eip1193Provider | undefined;
+  if (!provider) throw new Error("Wallet connected but no provider available.");
+  if (!walletKeys || walletKeys.wallet.toLowerCase() !== wallet.toLowerCase()) {
+    walletKeys = { wallet };
+  }
+  return { wallet, provider };
+}
+
+async function signAndDerive(message: string, info: Uint8Array, label: string): Promise<Uint8Array> {
+  const { wallet, provider } = await ensureWalletConnected();
+  const messageHex = "0x" + bytesToHex(new TextEncoder().encode(message));
+  // Raw EIP-1193 personal_sign — ethers BrowserProvider multiplexes extra
+  // chain/accounts queries that have triggered "Invalid Id" on MetaMask
+  // Mobile through WalletConnect.
+  const sigHex = await withWalletPrompt(label, async () =>
+    (await provider.request({
+      method: "personal_sign",
+      params: [messageHex, wallet],
+    })) as string,
+  );
+  return await deriveKeyFromSig(sigHex, info);
+}
+
+async function ensureLibraryKey(): Promise<{ wallet: string; key: Uint8Array }> {
+  if (walletKeys?.libraryKey) return { wallet: walletKeys.wallet, key: walletKeys.libraryKey };
+  const key = await signAndDerive(SIGN_MESSAGE, HKDF_INFO, "sign the library-derive message in your wallet");
+  walletKeys = { ...(walletKeys ?? { wallet: (await ensureWalletConnected()).wallet }), libraryKey: key };
+  renderPrivateEtches();
+  return { wallet: walletKeys.wallet, key };
+}
+
+async function ensureStorageKey(): Promise<{ wallet: string; key: Uint8Array }> {
+  if (walletKeys?.storageKey) return { wallet: walletKeys.wallet, key: walletKeys.storageKey };
+  const key = await signAndDerive(SIGN_MESSAGE_PRIVATE, HKDF_INFO_PRIVATE_STORAGE, "sign the private-storage message in your wallet");
+  walletKeys = { ...(walletKeys ?? { wallet: (await ensureWalletConnected()).wallet }), storageKey: key };
+  renderPrivateEtches();
+  return { wallet: walletKeys.wallet, key };
+}
+
+// Backwards-compatible name kept for the existing Connect-wallet handler.
+async function connectAndDeriveKey(): Promise<{ wallet: string; key: Uint8Array }> {
+  return await ensureLibraryKey();
 }
 
 // ── Library write (Phase 3b) ─────────────────────────────────────
@@ -323,7 +371,7 @@ async function sealLibraryBatch(key: Uint8Array, payload: Uint8Array): Promise<U
 type LibraryAction = "add" | "bookmark" | "hide";
 
 async function addToLibrary(addr: string, title: string, action: LibraryAction = "add"): Promise<string> {
-  if (!currentLibrary) throw new Error("Library not unlocked — connect wallet first.");
+  const { wallet, key } = await ensureLibraryKey();
   const walletProvider = appKit.getWalletProvider() as Eip1193Provider | undefined;
   if (!walletProvider) throw new Error("Wallet provider unavailable.");
 
@@ -336,15 +384,17 @@ async function addToLibrary(addr: string, title: string, action: LibraryAction =
   };
   const payloadJson = JSON.stringify({ v: 1, entries: [wireEntry] });
   const payload = new TextEncoder().encode(payloadJson);
-  const blob = await sealLibraryBatch(currentLibrary.key, payload);
+  const blob = await sealLibraryBatch(key, payload);
   if (!blob) throw new Error("Library entry too large for max bucket.");
 
   const recipient = await recipientForBlob(blob);
   const calldata = "0x" + bytesToHex(blob);
-  return (await walletProvider.request({
-    method: "eth_sendTransaction",
-    params: [{ from: currentLibrary.wallet, to: recipient, data: calldata, value: "0x0" }],
-  })) as string;
+  return await withWalletPrompt("sign the library update in your wallet", async () =>
+    (await walletProvider.request({
+      method: "eth_sendTransaction",
+      params: [{ from: wallet, to: recipient, data: calldata, value: "0x0" }],
+    })) as string,
+  );
 }
 
 // ── UI ───────────────────────────────────────────────────────────
@@ -725,6 +775,56 @@ function renderText(parent: HTMLElement, title: string, content: string): void {
   parent.appendChild(pre);
 }
 
+// ── Private etch storage (Phase 3c) ──────────────────────────────
+//
+// Tauri webview localStorage is per-app, persisted to disk by WebKit.
+// We don't trust the file system for confidentiality; data-maps are
+// AES-GCM-sealed with a wallet-derived storage key before write.
+
+type PrivateEntry = { id: string; title: string; ts: number; size: number; cipher: string };
+
+function privateStoreKey(wallet: string): string {
+  return `etchit:private-maps:v1:${wallet.toLowerCase()}`;
+}
+
+function loadPrivateEntries(wallet: string): PrivateEntry[] {
+  try {
+    const raw = localStorage.getItem(privateStoreKey(wallet));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { entries?: PrivateEntry[] };
+    return Array.isArray(parsed.entries) ? parsed.entries : [];
+  } catch { return []; }
+}
+
+function savePrivateEntries(wallet: string, entries: PrivateEntry[]): void {
+  localStorage.setItem(privateStoreKey(wallet), JSON.stringify({ entries }));
+}
+
+async function encryptDataMap(storageKey: Uint8Array, dataMapHex: string): Promise<string> {
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const aesKey = await crypto.subtle.importKey("raw", storageKey, { name: "AES-GCM" }, false, ["encrypt"]);
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, aesKey, new TextEncoder().encode(dataMapHex)),
+  );
+  return bytesToHex(nonce) + bytesToHex(ct);
+}
+
+async function decryptDataMap(storageKey: Uint8Array, cipherHex: string): Promise<string> {
+  const blob = hexToBytes(cipherHex);
+  if (blob.length < 12 + 16) throw new Error("private cipher blob too short");
+  const nonce = blob.slice(0, 12);
+  const ct = blob.slice(12);
+  const aesKey = await crypto.subtle.importKey("raw", storageKey, { name: "AES-GCM" }, false, ["decrypt"]);
+  const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce }, aesKey, ct));
+  return new TextDecoder().decode(pt);
+}
+
+function newId(): string {
+  // Random 8-byte hex id for local-only references; collision-tolerant
+  // since it's a per-wallet local index.
+  return bytesToHex(crypto.getRandomValues(new Uint8Array(8)));
+}
+
 // ── Etch creation (Phase 3a) ─────────────────────────────────────
 
 type PaymentDto = { quote_hash: string; rewards_address: string; amount: string };
@@ -750,11 +850,30 @@ async function ethCall(to: string, data: string): Promise<string> {
   return await rpc.call({ to, data });
 }
 
-async function sendTx(walletProvider: Eip1193Provider, from: string, to: string, data: string): Promise<string> {
-  return (await walletProvider.request({
-    method: "eth_sendTransaction",
-    params: [{ from, to, data }],
-  })) as string;
+// Global "check your phone" banner. WalletConnect requests are
+// invisible on desktop unless we tell the user to look — counter-based
+// so concurrent calls don't flicker the banner off.
+let walletPromptDepth = 0;
+async function withWalletPrompt<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const banner = $("walletPrompt");
+  $("walletPromptLabel").textContent = label + "…";
+  walletPromptDepth++;
+  banner.removeAttribute("hidden");
+  try {
+    return await fn();
+  } finally {
+    walletPromptDepth = Math.max(0, walletPromptDepth - 1);
+    if (walletPromptDepth === 0) banner.setAttribute("hidden", "");
+  }
+}
+
+async function sendTx(walletProvider: Eip1193Provider, from: string, to: string, data: string, label: string): Promise<string> {
+  return await withWalletPrompt(label, async () =>
+    (await walletProvider.request({
+      method: "eth_sendTransaction",
+      params: [{ from, to, data }],
+    })) as string,
+  );
 }
 
 async function etchPublic(text: string, title: string): Promise<PublicEtchResult> {
@@ -783,7 +902,7 @@ async function etchPublic(text: string, title: string): Promise<PublicEtchResult
     setEtchStatus("Approve ANT in your wallet…", "warn");
     const approveAmount = SESSION_BUDGET_ATTO > totalAtto ? SESSION_BUDGET_ATTO : totalAtto;
     const approveCalldata = erc20Iface.encodeFunctionData("approve", [VAULT_ADDRESS, approveAmount]);
-    const approveHash = await sendTx(walletProvider, userAddress, ANT_TOKEN_ADDRESS, approveCalldata);
+    const approveHash = await sendTx(walletProvider, userAddress, ANT_TOKEN_ADDRESS, approveCalldata, "approve ANT spend in your wallet");
     setEtchStatus(`Waiting for approve confirmation (${approveHash.slice(0, 10)}…)`, "warn");
     const approveReceipt = await rpc.waitForTransaction(approveHash);
     if (approveReceipt?.status !== 1) throw new Error(`ANT approve reverted (${approveHash})`);
@@ -797,7 +916,7 @@ async function etchPublic(text: string, title: string): Promise<PublicEtchResult
     ensureHex(p.quote_hash),
   ]);
   const payCalldata = vaultIface.encodeFunctionData("payForQuotes", [vaultPayments]);
-  const payHash = await sendTx(walletProvider, userAddress, VAULT_ADDRESS, payCalldata);
+  const payHash = await sendTx(walletProvider, userAddress, VAULT_ADDRESS, payCalldata, "sign the etch payment in your wallet");
   setEtchStatus(`Waiting for payment confirmation (${payHash.slice(0, 10)}…)`, "warn");
   const payReceipt = await rpc.waitForTransaction(payHash);
   if (payReceipt?.status !== 1) throw new Error(`payForQuotes reverted (${payHash})`);
@@ -855,7 +974,7 @@ function showEtchResult(result: PublicEtchResult, title: string): void {
     addBtn.disabled = true;
     libStatus.style.color = "var(--ash)";
     try {
-      if (!currentLibrary) {
+      if (!walletKeys) {
         // Derive on demand — same flow as Connect wallet, but without
         // running the full library decode after.
         libStatus.textContent = "Sign library-derive message in your wallet…";
@@ -887,23 +1006,360 @@ function showEtchResult(result: PublicEtchResult, title: string): void {
   root.appendChild(panel);
 }
 
+type PreparedPrivateEtch = { upload_id: string; payments: PaymentDto[]; total_amount: string; data_map: string };
+type PrivateEtchResult = { chunks_stored: number };
+
+async function etchPrivate(text: string, title: string): Promise<{ id: string; chunks: number }> {
+  if (!inTauri) throw new Error("Etching requires the desktop app (no FFI in plain browser).");
+
+  const account = appKit.getAccount() as AppKitAccount | undefined;
+  if (!account?.isConnected || !account.address) throw new Error("Connect a wallet first.");
+  const userAddress = account.address;
+  const walletProvider = appKit.getWalletProvider() as Eip1193Provider | undefined;
+  if (!walletProvider) throw new Error("Wallet provider unavailable.");
+
+  // Storage key is needed to encrypt the data-map at rest. If not yet
+  // derived, prompt for the dedicated private-storage personal_sign —
+  // distinct from the library-derive sign so we don't conflate them.
+  setEtchStatus("Sign private-storage message in your wallet (one-time)…", "warn");
+  const { wallet: storageWallet, key: storageKey } = await ensureStorageKey();
+
+  const data = buildEnvelope(text, title);
+
+  setEtchStatus("Collecting quotes from network…", "warn");
+  const prepared = await invoke<PreparedPrivateEtch>("prepare_private_etch", { data: Array.from(data) });
+  const totalAtto = BigInt(prepared.total_amount);
+
+  setEtchStatus("Checking ANT allowance…", "warn");
+  const allowanceCalldata = erc20Iface.encodeFunctionData("allowance", [userAddress, VAULT_ADDRESS]);
+  const allowance = BigInt(await ethCall(ANT_TOKEN_ADDRESS, allowanceCalldata));
+  if (allowance < totalAtto) {
+    setEtchStatus("Approve ANT in your wallet…", "warn");
+    const approveAmount = SESSION_BUDGET_ATTO > totalAtto ? SESSION_BUDGET_ATTO : totalAtto;
+    const approveCalldata = erc20Iface.encodeFunctionData("approve", [VAULT_ADDRESS, approveAmount]);
+    const approveHash = await sendTx(walletProvider, userAddress, ANT_TOKEN_ADDRESS, approveCalldata, "approve ANT spend in your wallet");
+    setEtchStatus(`Waiting for approve confirmation (${approveHash.slice(0, 10)}…)`, "warn");
+    const r = await rpc.waitForTransaction(approveHash);
+    if (r?.status !== 1) throw new Error(`ANT approve reverted (${approveHash})`);
+  }
+
+  setEtchStatus("Sign payment in your wallet…", "warn");
+  const ensureHex = (s: string) => (s.startsWith("0x") || s.startsWith("0X") ? s : "0x" + s);
+  const vaultPayments = prepared.payments.map((p) => [
+    ensureHex(p.rewards_address),
+    BigInt(p.amount),
+    ensureHex(p.quote_hash),
+  ]);
+  const payCalldata = vaultIface.encodeFunctionData("payForQuotes", [vaultPayments]);
+  const payHash = await sendTx(walletProvider, userAddress, VAULT_ADDRESS, payCalldata, "sign the etch payment in your wallet");
+  setEtchStatus(`Waiting for payment confirmation (${payHash.slice(0, 10)}…)`, "warn");
+  const r = await rpc.waitForTransaction(payHash);
+  if (r?.status !== 1) throw new Error(`payForQuotes reverted (${payHash})`);
+
+  setEtchStatus("Finalizing upload — pushing chunks to network…", "warn");
+  const txHashes: Record<string, string> = {};
+  for (const p of prepared.payments) txHashes[p.quote_hash] = payHash;
+  const result = await invoke<PrivateEtchResult>("finalize_private_etch", {
+    uploadId: prepared.upload_id,
+    txHashes,
+  });
+
+  // Persist the data-map locally — encrypted with the wallet-derived
+  // storage key. Without this map, the etch is unrecoverable.
+  setEtchStatus("Saving data-map locally…", "warn");
+  const id = newId();
+  const cipher = await encryptDataMap(storageKey, prepared.data_map);
+  const entries = loadPrivateEntries(storageWallet);
+  entries.push({ id, title: title || "", ts: Math.floor(Date.now() / 1000), size: data.length, cipher });
+  savePrivateEntries(storageWallet, entries);
+
+  return { id, chunks: result.chunks_stored };
+}
+
+async function fetchPrivateEntry(id: string): Promise<{ data: Uint8Array; title: string }> {
+  const { wallet, key } = await ensureStorageKey();
+  const entries = loadPrivateEntries(wallet);
+  const entry = entries.find((e) => e.id === id);
+  if (!entry) throw new Error("Entry not found locally.");
+  const dataMapHex = await decryptDataMap(key, entry.cipher);
+  const arr = await invoke<number[]>("fetch_private", { dataMapHex });
+  return { data: Uint8Array.from(arr), title: entry.title };
+}
+
 $("etchBtn").addEventListener("click", async () => {
   const text = $<HTMLTextAreaElement>("etchText").value;
   const title = $<HTMLInputElement>("etchTitle").value.trim();
+  const isPrivate = $<HTMLInputElement>("etchPrivate").checked;
   if (!text.trim()) { setEtchStatus("Content is empty.", "err"); return; }
 
   const btn = $<HTMLButtonElement>("etchBtn");
   btn.disabled = true;
   $("etchResult").innerHTML = "";
   try {
-    const result = await etchPublic(text, title);
-    setEtchStatus("Done.", "ok");
-    showEtchResult(result, title);
+    if (isPrivate) {
+      const r = await etchPrivate(text, title);
+      setEtchStatus("Done.", "ok");
+      showPrivateEtchResult(r.id, r.chunks, title);
+      renderPrivateEtches();
+    } else {
+      const r = await etchPublic(text, title);
+      setEtchStatus("Done.", "ok");
+      showEtchResult(r, title);
+    }
+    void refreshAntBalance();
   } catch (e) {
     setEtchStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
   } finally {
     btn.disabled = false;
   }
+});
+
+// ── Private etches list (Phase 3c) ───────────────────────────────
+
+function showPrivateEtchResult(id: string, chunks: number, title: string): void {
+  const root = $("etchResult");
+  root.innerHTML = "";
+  const panel = document.createElement("div");
+  panel.className = "etch-result";
+
+  const heading = document.createElement("div");
+  heading.style.color = "var(--green)";
+  heading.style.fontWeight = "500";
+  heading.textContent = `Private etch · ${chunks} chunks stored · saved locally`;
+  panel.appendChild(heading);
+
+  const sub = document.createElement("div");
+  sub.className = "fetch-meta";
+  sub.style.color = "var(--ash)";
+  sub.style.marginTop = "4px";
+  sub.textContent = `id: ${id}${title ? ` · title: ${title}` : ""} · only this device can fetch it`;
+  panel.appendChild(sub);
+
+  root.appendChild(panel);
+}
+
+function knownWallet(): string | null {
+  // In-memory cache first; fall back to AppKit's persisted session
+  // (survives page reloads / HMR refreshes via WalletConnect storage).
+  if (walletKeys?.wallet) return walletKeys.wallet;
+  const acct = appKit.getAccount() as AppKitAccount | undefined;
+  if (acct?.isConnected && acct.address) return acct.address;
+  return null;
+}
+
+function renderPrivateEtches(): void {
+  const root = $("privateList");
+  root.innerHTML = "";
+  const wallet = knownWallet();
+  if (!wallet) {
+    const div = document.createElement("div");
+    div.className = "empty";
+    div.textContent = "Connect wallet to see private etches stored on this device.";
+    root.appendChild(div);
+    return;
+  }
+  const entries = loadPrivateEntries(wallet).slice().sort((a, b) => b.ts - a.ts);
+  if (!entries.length) {
+    const div = document.createElement("div");
+    div.className = "empty";
+    div.textContent = "No private etches on this device yet.";
+    root.appendChild(div);
+    return;
+  }
+  for (const e of entries) {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = e.title || "Untitled";
+    row.appendChild(title);
+
+    const meta = document.createElement("div");
+    meta.className = "addr";
+    meta.textContent = `id: ${e.id} · ${formatSize(e.size)} · ${new Date(e.ts * 1000).toLocaleString()}`;
+    row.appendChild(meta);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    const fetchBtn = document.createElement("button");
+    fetchBtn.className = "outlined";
+    fetchBtn.textContent = "Fetch";
+    fetchBtn.onclick = async () => {
+      fetchBtn.disabled = true;
+      fetchBtn.textContent = "Fetching…";
+      const out = document.createElement("div");
+      out.className = "fetch-result";
+      out.textContent = "Fetching from network…";
+      row.appendChild(out);
+      try {
+        const { data, title: t } = await fetchPrivateEntry(e.id);
+        const detected = detectContent(data);
+        out.innerHTML = "";
+        const meta2 = document.createElement("div");
+        meta2.className = "fetch-meta";
+        meta2.textContent = `${detected.type} · ${formatSize(data.length)}`;
+        out.appendChild(meta2);
+        if (detected.type === "envelope") {
+          const decoded = new TextDecoder().decode(data);
+          const env = parseEnvelope(decoded);
+          renderText(out, env.title || t, env.content);
+        } else if (detected.type === "text") {
+          renderText(out, t, new TextDecoder().decode(data));
+        } else if (detected.type === "image") {
+          const blob = new Blob([data as BlobPart], { type: detected.mime });
+          const url = URL.createObjectURL(blob);
+          const img = document.createElement("img");
+          img.src = url;
+          img.className = "fetch-img";
+          out.appendChild(img);
+        } else {
+          appendError(out, `${detected.mime} — save to disk to view.`);
+          addSaveButton(out, data, t, detected.ext);
+        }
+      } catch (err) {
+        out.innerHTML = "";
+        appendError(out, `Fetch failed: ${(err as Error).message ?? String(err)}`);
+      } finally {
+        fetchBtn.disabled = false;
+        fetchBtn.textContent = "Fetch";
+      }
+    };
+    actions.appendChild(fetchBtn);
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "outlined";
+    delBtn.textContent = "Delete";
+    delBtn.onclick = () => {
+      const w = knownWallet();
+      if (!w) return;
+
+      // Replace the action row with an inline two-step confirmation.
+      // Inline (not a browser confirm()) so the warning text is fully
+      // readable and can't be missed by an absent-minded enter-press.
+      const original = actions.cloneNode(true);
+      actions.innerHTML = "";
+
+      const warn = document.createElement("div");
+      warn.className = "fetch-err";
+      warn.style.marginBottom = "8px";
+      warn.textContent =
+        "Permanent delete: the data-map is on this device only. " +
+        "Once removed, this etch cannot be recovered — even with your wallet.";
+      actions.appendChild(warn);
+
+      const btnRow = document.createElement("div");
+      btnRow.style.display = "flex";
+      btnRow.style.gap = "6px";
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.className = "outlined";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.onclick = () => {
+        actions.replaceWith(original as HTMLElement);
+      };
+      btnRow.appendChild(cancelBtn);
+
+      const confirmBtn = document.createElement("button");
+      confirmBtn.className = "outlined";
+      confirmBtn.style.borderColor = "var(--red)";
+      confirmBtn.style.color = "var(--red)";
+      confirmBtn.textContent = "Delete forever";
+      confirmBtn.onclick = () => {
+        const w2 = knownWallet();
+        if (!w2) return;
+        const filtered = loadPrivateEntries(w2).filter((x) => x.id !== e.id);
+        savePrivateEntries(w2, filtered);
+        renderPrivateEtches();
+      };
+      btnRow.appendChild(confirmBtn);
+
+      actions.appendChild(btnRow);
+    };
+    actions.appendChild(delBtn);
+
+    row.appendChild(actions);
+    root.appendChild(row);
+  }
+}
+
+// ── Wallet bar (Phase 3c) ────────────────────────────────────────
+
+function formatAnt(atto: bigint): string {
+  const whole = atto / 10n ** 18n;
+  const frac = (atto % 10n ** 18n) * 10000n / 10n ** 18n;
+  return `${whole}.${frac.toString().padStart(4, "0")}`;
+}
+
+async function fetchAntBalance(address: string): Promise<bigint | null> {
+  try {
+    const calldata = erc20Iface.encodeFunctionData("balanceOf", [address]);
+    const result = await ethCall(ANT_TOKEN_ADDRESS, calldata);
+    return BigInt(result);
+  } catch {
+    return null;
+  }
+}
+
+let lastBalanceAddr: string | null = null;
+function setWalletBarText(text: string, ok: boolean): void {
+  const status = $("walletStatus");
+  status.textContent = text;
+  if (ok) status.classList.add("ok");
+  else status.classList.remove("ok");
+}
+
+async function refreshWalletBar(): Promise<void> {
+  const acct = appKit.getAccount() as AppKitAccount | undefined;
+  const btn = $<HTMLButtonElement>("walletBtn");
+  if (acct?.isConnected && acct.address) {
+    const short = `${acct.address.slice(0, 6)}…${acct.address.slice(-4)}`;
+    setWalletBarText(`Wallet: ${short}`, true);
+    btn.textContent = "Manage";
+    if (lastBalanceAddr !== acct.address) {
+      lastBalanceAddr = acct.address;
+      const bal = await fetchAntBalance(acct.address);
+      // Recheck — connection may have flipped during the network call.
+      const stillConnected = (appKit.getAccount() as AppKitAccount | undefined);
+      if (bal !== null && stillConnected?.address === acct.address) {
+        setWalletBarText(`Wallet: ${short} · ${formatAnt(bal)} ANT`, true);
+      }
+    }
+  } else {
+    setWalletBarText("Wallet: not connected", false);
+    btn.textContent = "Connect";
+    lastBalanceAddr = null;
+    // Wallet has been cleared; drop any cached derived keys so a
+    // reconnect or different wallet doesn't reuse them.
+    walletKeys = null;
+  }
+}
+
+async function refreshAntBalance(): Promise<void> {
+  const acct = appKit.getAccount() as AppKitAccount | undefined;
+  if (!acct?.isConnected || !acct.address) return;
+  const bal = await fetchAntBalance(acct.address);
+  if (bal === null) return;
+  const stillConnected = (appKit.getAccount() as AppKitAccount | undefined);
+  if (stillConnected?.address !== acct.address) return;
+  const short = `${acct.address.slice(0, 6)}…${acct.address.slice(-4)}`;
+  setWalletBarText(`Wallet: ${short} · ${formatAnt(bal)} ANT`, true);
+}
+
+$("walletBtn").addEventListener("click", () => {
+  void appKit.open();
+});
+
+setInterval(() => { void refreshAntBalance(); }, 30_000);
+
+// Refresh on load + whenever AppKit's account state changes (covers
+// late-loading persisted sessions and live disconnects).
+renderPrivateEtches();
+void refreshWalletBar();
+appKit.subscribeAccount(() => {
+  void refreshWalletBar();
+  renderPrivateEtches();
 });
 
 function appendError(parent: HTMLElement, msg: string): void {

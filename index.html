@@ -3,29 +3,43 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>etchit library viewer</title>
+    <title>etchit — etch it once, fetch it forever</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/styles.css" />
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
     <main>
-      <h1>etchit library viewer</h1>
+      <h1 class="brand">etch<span class="brand-mark">/</span>it</h1>
       <p class="sub">
-        Decrypts your on-chain library entries client-side. Once connected to the Autonomi network,
-        entries are fetchable in-app with no <code>ant-cli</code> shell-out.
+        <em>Etch it once.</em> Fetch it forever.
       </p>
 
-      <div id="network" class="net-bar">Network: <span id="netStatus">starting…</span></div>
+      <div class="top-row">
+        <div id="network" class="net-bar">Network: <span id="netStatus">starting…</span></div>
+        <div id="walletBar" class="wallet-bar">
+          <span id="walletStatus">Wallet: not connected</span>
+          <button id="walletBtn" class="outlined">Connect</button>
+        </div>
+      </div>
+
+      <div id="walletPrompt" class="wallet-prompt" hidden>
+        <span class="wallet-prompt-icon">📱</span>
+        <span>Check your phone — <span id="walletPromptLabel">…</span></span>
+      </div>
 
       <section class="etch-panel">
-        <h2>Create an etch</h2>
-        <p class="sub" style="margin-bottom: 12px;">
-          Wallet must be connected. Public etches anyone with the resulting address can fetch.
-        </p>
+        <h2>Create an etch <span class="info" data-tip="Wallet must be connected. Public etches: anyone with the address can fetch. Private etches: data-map stays on this device, encrypted with your wallet key.">i</span></h2>
         <label for="etchTitle">Title (optional)</label>
         <input id="etchTitle" type="text" placeholder="e.g. release notes" autocomplete="off" />
         <label for="etchText">Content</label>
         <textarea id="etchText" rows="6" placeholder="Paste text here. Multi-line is fine."></textarea>
+        <label class="checkbox">
+          <input id="etchPrivate" type="checkbox" />
+          <span>Private (data-map stored locally, not on the network)</span>
+        </label>
         <div class="controls">
           <button id="etchBtn">Etch</button>
           <span id="etchStatus" class="status"></span>
@@ -33,16 +47,18 @@
         <div id="etchResult"></div>
       </section>
 
-      <h2 class="section-title">Library</h2>
+      <h2 class="section-title">Private etches</h2>
+      <p class="sub" style="margin-bottom: 12px;">
+        Stored on this device only. Encrypted at rest with a wallet-derived key.
+      </p>
+      <div id="privateList" class="results"></div>
 
-      <div class="controls" style="margin-top: 0; margin-bottom: 8px;">
-        <button id="connect">Connect wallet</button>
+      <h2 class="section-title">Library <span class="info" data-tip="Pulls your encrypted library entries from Arbitrum and decrypts them locally. Uses your wallet to sign a derive-key message (same as the mobile app), no copy-paste of the library key needed.">i</span></h2>
+
+      <div class="controls" style="margin-top: 8px; margin-bottom: 8px;">
+        <button id="connect">Open library</button>
         <span id="connectStatus" class="status"></span>
       </div>
-      <p class="sub" style="font-size: 12px; margin-top: 4px;">
-        Uses your browser-extension wallet to sign the same library-derive message the mobile app uses,
-        so the key is recreated automatically — no copy-paste.
-      </p>
 
       <details id="manualSection">
         <summary>Or enter key manually</summary>
@@ -71,10 +87,6 @@
 
       <div class="results" id="results"></div>
 
-      <p class="footer">
-        Spec: <code>docs/library-format-v1.md</code>. Decrypt logic mirrors the Kotlin reference
-        implementation; both round-trip the same wire format.
-      </p>
     </main>
   </body>
 </html>

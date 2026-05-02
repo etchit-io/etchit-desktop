@@ -19,8 +19,16 @@ html, body {
 }
 
 body {
-  font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+  font: 14px/1.6 "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
   padding: 32px 16px;
+}
+
+em {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1.15em;
+  color: var(--copper);
+  font-weight: 400;
 }
 
 main {
@@ -32,6 +40,22 @@ h1 {
   font-size: 22px;
   font-weight: 600;
   margin: 0 0 4px;
+}
+
+.brand {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 36px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+  color: var(--bone);
+  display: inline-block;
+}
+
+.brand-mark {
+  color: var(--copper);
+  font-weight: 700;
+  margin: 0 -2px;
 }
 
 p.sub {
@@ -172,7 +196,8 @@ code {
 }
 
 .net-bar {
-  margin: 0 0 18px;
+  margin: 0;
+  flex: 1;
   padding: 8px 12px;
   background: var(--ink-2);
   border: 1px solid #1f1f1f;
@@ -180,6 +205,55 @@ code {
   font-size: 12px;
   color: var(--ash);
   font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.top-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin: 0 0 18px;
+}
+
+.wallet-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 12px;
+  background: var(--ink-2);
+  border: 1px solid #1f1f1f;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ash);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.wallet-bar #walletStatus.ok { color: var(--green); }
+.wallet-bar #walletBtn { padding: 4px 10px; font-size: 11px; }
+
+.wallet-prompt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  margin: 0 0 18px;
+  background: var(--ink-2);
+  border: 1px solid var(--copper);
+  border-radius: 6px;
+  color: var(--bone);
+  font-size: 13px;
+  animation: pulse 2s infinite;
+}
+
+.wallet-prompt[hidden] { display: none; }
+
+.wallet-prompt-icon {
+  font-size: 18px;
+  filter: grayscale(0.2);
+}
+
+@keyframes pulse {
+  0%, 100% { border-color: var(--copper); }
+  50% { border-color: rgba(201, 115, 43, 0.45); }
 }
 
 .net-bar.ok #netStatus { color: var(--green); }
@@ -287,5 +361,61 @@ textarea:focus { outline: 0; border-color: var(--copper); }
   color: var(--copper);
   word-break: break-all;
   margin: 4px 0 8px;
+}
+
+label.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  color: var(--bone);
+  cursor: pointer;
+}
+
+label.checkbox input { margin: 0; }
+
+.info {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ash);
+  border-radius: 50%;
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 12px;
+  color: var(--ash);
+  cursor: help;
+  vertical-align: 1px;
+  margin-left: 4px;
+  position: relative;
+  user-select: none;
+}
+
+.info:hover { color: var(--copper); border-color: var(--copper); }
+
+.info:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 320px;
+  padding: 10px 12px;
+  background: var(--ink-3);
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  color: var(--bone);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.5;
+  z-index: 10;
+  white-space: normal;
+  letter-spacing: 0;
+  text-transform: none;
 }
 

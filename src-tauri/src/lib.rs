@@ -122,8 +122,74 @@ async fn finalize_public_etch(upload_id: String, tx_hashes: HashMap<String, Stri
     })
 }
 
+#[derive(Serialize)]
+struct PreparedPrivateEtchDto {
+    upload_id: String,
+    payments: Vec<PaymentDto>,
+    total_amount: String,
+    data_map: String,
+}
+
+#[derive(Serialize)]
+struct PrivateEtchResultDto {
+    chunks_stored: u64,
+}
+
+#[tauri::command]
+async fn prepare_private_etch(data: Vec<u8>, state: State<'_, AppState>) -> Result<PreparedPrivateEtchDto, String> {
+    let client = {
+        let guard = state.client.lock().await;
+        guard.as_ref().cloned().ok_or_else(|| "not connected".to_string())?
+    };
+    let prep = client.prepare_data_upload(data).await.map_err(|e| format!("{e}"))?;
+    Ok(PreparedPrivateEtchDto {
+        upload_id: prep.upload_id,
+        payments: prep.payments.into_iter().map(|p| PaymentDto {
+            quote_hash: p.quote_hash,
+            rewards_address: p.rewards_address,
+            amount: p.amount,
+        }).collect(),
+        total_amount: prep.total_amount,
+        data_map: prep.data_map,
+    })
+}
+
+#[tauri::command]
+async fn finalize_private_etch(upload_id: String, tx_hashes: HashMap<String, String>, state: State<'_, AppState>) -> Result<PrivateEtchResultDto, String> {
+    let client = {
+        let guard = state.client.lock().await;
+        guard.as_ref().cloned().ok_or_else(|| "not connected".to_string())?
+    };
+    let res = client.finalize_upload(upload_id, tx_hashes).await.map_err(|e| format!("{e}"))?;
+    Ok(PrivateEtchResultDto { chunks_stored: res.chunks_stored })
+}
+
+#[tauri::command]
+async fn fetch_private(data_map_hex: String, state: State<'_, AppState>) -> Result<Vec<u8>, String> {
+    let client = {
+        let guard = state.client.lock().await;
+        guard.as_ref().cloned().ok_or_else(|| "not connected".to_string())?
+    };
+    client.data_get_private(data_map_hex).await.map_err(|e| format!("{e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Bridge log:: macros into tracing, then init a stderr fmt subscriber.
+    // ant-core / ant-node / saorsa-* use both log + tracing; this captures
+    // both. Default filter is loud enough to see DHT activity but quiet on
+    // saorsa-transport's per-packet noise. Override with RUST_LOG.
+    let _ = tracing_log::LogTracer::init();
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(
+            "info,ant_ffi=debug,ant_core=debug,ant_node=info,saorsa_transport=warn,saorsa_core=info"
+        ));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_writer(std::io::stderr)
+        .try_init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -135,7 +201,10 @@ pub fn run() {
             disconnect,
             save_bytes,
             prepare_public_etch,
-            finalize_public_etch
+            finalize_public_etch,
+            prepare_private_etch,
+            finalize_private_etch,
+            fetch_private
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
