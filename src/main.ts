@@ -5,8 +5,14 @@
 // fetched in-app instead of shelling out to ant-cli.
 
 import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 
-const inTauri = typeof (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== "undefined";
+// Tauri v2 with withGlobalTauri=true exposes window.__TAURI__. Either of
+// __TAURI_INTERNALS__ or __TAURI__ being present means we're inside the
+// desktop webview vs. running in a plain browser dev session.
+const inTauri =
+  typeof (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== "undefined" ||
+  typeof (window as unknown as { __TAURI__?: unknown }).__TAURI__ !== "undefined";
 
 const VERSION_BYTE = 0x01;
 const NONCE_LEN = 12;
@@ -267,15 +273,30 @@ function render(entries: LibraryEntry[]): void {
     };
     actions.appendChild(copyAddr);
 
-    const copyCmd = document.createElement("button");
-    copyCmd.className = "outlined";
-    copyCmd.textContent = "Copy ant command";
-    copyCmd.onclick = () => {
-      const safe = (e.title || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 50) || e.addr.slice(0, 10);
-      navigator.clipboard.writeText(`ant file download --output ${safe} ${e.addr}`);
-      setStatus("status", "Command copied", "ok");
-    };
-    actions.appendChild(copyCmd);
+    if (inTauri) {
+      const fetchBtn = document.createElement("button");
+      fetchBtn.className = "outlined";
+      fetchBtn.textContent = "Fetch";
+      fetchBtn.onclick = () => {
+        fetchBtn.disabled = true;
+        fetchBtn.textContent = "Fetching…";
+        void fetchInto(row, e.addr, e.title).finally(() => {
+          fetchBtn.disabled = false;
+          fetchBtn.textContent = "Fetch";
+        });
+      };
+      actions.appendChild(fetchBtn);
+    } else {
+      const copyCmd = document.createElement("button");
+      copyCmd.className = "outlined";
+      copyCmd.textContent = "Copy ant command";
+      copyCmd.onclick = () => {
+        const safe = (e.title || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 50) || e.addr.slice(0, 10);
+        navigator.clipboard.writeText(`ant file download --output ${safe} ${e.addr}`);
+        setStatus("status", "Command copied", "ok");
+      };
+      actions.appendChild(copyCmd);
+    }
 
     row.appendChild(actions);
     root.appendChild(row);
@@ -355,6 +376,16 @@ function setNetStatus(msg: string, cls: "ok" | "err" | "warn" | "" = ""): void {
   bar.className = "net-bar" + (cls ? ` ${cls}` : "");
 }
 
+// Warmup constants — same as Android MainActivity.kt. Client::connect
+// returns as soon as one peer attaches; DHT bootstrap continues in the
+// background, so peer count rises over the next several seconds.
+const WARMUP_TARGET_PEERS = 10;
+const WARMUP_SUSTAINED_MS = 3_000;
+const WARMUP_CAP_MS = 15_000;
+const PEER_REFRESH_MS = 5_000;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 async function autoConnect(): Promise<void> {
   if (!inTauri) {
     setNetStatus("not running inside Tauri (no FFI)", "warn");
@@ -362,11 +393,255 @@ async function autoConnect(): Promise<void> {
   }
   setNetStatus("connecting…", "warn");
   try {
-    const peers = await invoke<number>("connect", {});
-    setNetStatus(`${peers} peers`, "ok");
+    await invoke<number>("connect", {});
   } catch (e) {
     setNetStatus(`failed: ${(e as Error).message ?? String(e)}`, "err");
+    return;
+  }
+
+  // Warmup: poll until peer count is ≥ target sustained for SUSTAINED_MS,
+  // capped at CAP_MS total.
+  const warmupStart = Date.now();
+  let sustainedSince = -1;
+  let lastCount = 0;
+  while (Date.now() - warmupStart < WARMUP_CAP_MS) {
+    try { lastCount = await invoke<number>("peer_count"); } catch { lastCount = 0; }
+    setNetStatus(`joining… ${lastCount} peers`, "warn");
+    if (lastCount >= WARMUP_TARGET_PEERS) {
+      if (sustainedSince < 0) sustainedSince = Date.now();
+      if (Date.now() - sustainedSince >= WARMUP_SUSTAINED_MS) break;
+    } else {
+      sustainedSince = -1;
+    }
+    await sleep(500);
+  }
+  setNetStatus(`${lastCount} peers`, "ok");
+
+  // Live refresh forever (cheap; just a peer_count call every few seconds).
+  void refreshPeersForever();
+}
+
+async function refreshPeersForever(): Promise<void> {
+  while (true) {
+    await sleep(PEER_REFRESH_MS);
+    try {
+      const n = await invoke<number>("peer_count");
+      setNetStatus(`${n} peers`, "ok");
+    } catch {
+      setNetStatus("disconnected", "err");
+      return;
+    }
   }
 }
 
 void autoConnect();
+
+// ── Content detection (Phase 2b) ─────────────────────────────────
+//
+// Mirrors ContentDetector.kt + PasteUtils.parseEnvelope on Android.
+// Decides how to render a fetched blob: ETCH_ENVELOPE / TEXT / IMAGE
+// / BACKUP / BINARY.
+
+type ContentType = "envelope" | "text" | "image" | "backup" | "binary";
+type DetectResult = { type: ContentType; mime: string; ext: string };
+
+const BACKUP_MAGIC = new TextEncoder().encode("ETCHIT_BACKUP_v1\n");
+
+function startsWith(buf: Uint8Array, needle: Uint8Array, offset = 0): boolean {
+  if (offset + needle.length > buf.length) return false;
+  for (let i = 0; i < needle.length; i++) if (buf[offset + i] !== needle[i]) return false;
+  return true;
+}
+
+function startsWithStr(buf: Uint8Array, s: string, offset = 0): boolean {
+  return startsWith(buf, new TextEncoder().encode(s), offset);
+}
+
+function detectContent(data: Uint8Array): DetectResult {
+  if (data.length >= BACKUP_MAGIC.length && startsWith(data, BACKUP_MAGIC)) {
+    return { type: "backup", mime: "application/octet-stream", ext: "bin" };
+  }
+
+  if (data.length <= 10_000_000) {
+    try {
+      const s = new TextDecoder("utf-8", { fatal: true }).decode(data);
+      if (s.includes('"content"') && s.includes('"meta"')) {
+        return { type: "envelope", mime: "application/json", ext: "json" };
+      }
+    } catch { /* not utf-8, fall through */ }
+  }
+
+  if (data.length >= 4) {
+    if (data[0] === 0x89 && startsWithStr(data, "PNG", 1)) return { type: "image", mime: "image/png", ext: "png" };
+    if (data[0] === 0xFF && data[1] === 0xD8 && data[2] === 0xFF) return { type: "image", mime: "image/jpeg", ext: "jpg" };
+    if (startsWithStr(data, "GIF8")) return { type: "image", mime: "image/gif", ext: "gif" };
+    if (data.length >= 12 && startsWithStr(data, "RIFF") && startsWithStr(data, "WEBP", 8)) return { type: "image", mime: "image/webp", ext: "webp" };
+    if (data[0] === 0x42 && data[1] === 0x4D) return { type: "image", mime: "image/bmp", ext: "bmp" };
+  }
+
+  // Video / audio / PDF — kept as type:"binary" (no inline preview) but
+  // tagged with the right mime + extension so save dialog defaults make
+  // sense. Same magic-byte set as ContentDetector.kt.
+  if (data.length >= 12 && startsWithStr(data, "ftyp", 4)) return { type: "binary", mime: "video/mp4", ext: "mp4" };
+  if (data.length >= 4 && data[0] === 0x1A && data[1] === 0x45 && data[2] === 0xDF && data[3] === 0xA3) return { type: "binary", mime: "video/webm", ext: "webm" };
+  if (startsWithStr(data, "ID3") || (data.length >= 2 && data[0] === 0xFF && data[1] === 0xFB)) return { type: "binary", mime: "audio/mpeg", ext: "mp3" };
+  if (startsWithStr(data, "OggS")) return { type: "binary", mime: "audio/ogg", ext: "ogg" };
+  if (startsWithStr(data, "fLaC")) return { type: "binary", mime: "audio/flac", ext: "flac" };
+  if (data.length >= 12 && startsWithStr(data, "RIFF") && startsWithStr(data, "WAVE", 8)) return { type: "binary", mime: "audio/wav", ext: "wav" };
+  if (startsWithStr(data, "%PDF")) return { type: "binary", mime: "application/pdf", ext: "pdf" };
+  if (data.length >= 4 && data[0] === 0x50 && data[1] === 0x4B && (data[2] === 0x03 || data[2] === 0x05) && (data[3] === 0x04 || data[3] === 0x06)) return { type: "binary", mime: "application/zip", ext: "zip" };
+
+  if (data.length <= 10_000_000) {
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(data);
+      return { type: "text", mime: "text/plain", ext: "txt" };
+    } catch { /* not utf-8 */ }
+  }
+
+  return { type: "binary", mime: "application/octet-stream", ext: "bin" };
+}
+
+function parseEnvelope(raw: string): { title: string; content: string } {
+  try {
+    const obj = JSON.parse(raw) as { meta?: { title?: unknown }; content?: unknown };
+    const title = typeof obj.meta?.title === "string" ? obj.meta.title : "";
+    const content = typeof obj.content === "string" ? obj.content : raw;
+    return { title, content };
+  } catch {
+    return { title: "", content: raw };
+  }
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// ── Fetch action (Phase 2b) ──────────────────────────────────────
+
+async function fetchInto(row: HTMLDivElement, addr: string, fallbackTitle: string): Promise<void> {
+  if (!inTauri) {
+    appendError(row, "Fetching requires the desktop app (no FFI in plain browser).");
+    return;
+  }
+  const existing = row.querySelector(".fetch-result");
+  if (existing) existing.remove();
+
+  const out = document.createElement("div");
+  out.className = "fetch-result";
+  out.textContent = "Fetching from network…";
+  row.appendChild(out);
+
+  let bytes: Uint8Array;
+  try {
+    // Tauri serializes Rust Vec<u8> as a number[] over JSON IPC. Wasteful
+    // for large blobs; fine for the kilobyte-range etches this app handles.
+    const arr = await invoke<number[]>("fetch_public", { addrHex: addr });
+    bytes = Uint8Array.from(arr);
+  } catch (e) {
+    out.textContent = "";
+    appendError(out, `Fetch failed: ${(e as Error).message ?? String(e)}`);
+    return;
+  }
+
+  const detected = detectContent(bytes);
+  out.innerHTML = "";
+  const meta = document.createElement("div");
+  meta.className = "fetch-meta";
+  meta.textContent = `${detected.type} · ${formatSize(bytes.length)}`;
+  out.appendChild(meta);
+
+  switch (detected.type) {
+    case "envelope": {
+      const text = new TextDecoder().decode(bytes);
+      const { title, content } = parseEnvelope(text);
+      renderText(out, title || fallbackTitle, content);
+      break;
+    }
+    case "text": {
+      const text = new TextDecoder().decode(bytes);
+      renderText(out, fallbackTitle, text);
+      break;
+    }
+    case "image": {
+      const blob = new Blob([bytes as BlobPart], { type: detected.mime });
+      const url = URL.createObjectURL(blob);
+      const img = document.createElement("img");
+      img.src = url;
+      img.className = "fetch-img";
+      out.appendChild(img);
+      break;
+    }
+    case "backup": {
+      appendError(out, "Encrypted backup file — password decrypt not yet implemented in desktop.");
+      addSaveButton(out, bytes, fallbackTitle, "etchit-backup");
+      break;
+    }
+    case "binary": {
+      const note = document.createElement("div");
+      note.className = "fetch-meta";
+      note.style.color = "var(--ash)";
+      note.textContent = `${detected.mime} — save to disk to open with a native viewer.`;
+      out.appendChild(note);
+      addSaveButton(out, bytes, fallbackTitle, detected.ext);
+      break;
+    }
+  }
+}
+
+function renderText(parent: HTMLElement, title: string, content: string): void {
+  if (title) {
+    const t = document.createElement("div");
+    t.className = "fetch-title";
+    t.textContent = title;
+    parent.appendChild(t);
+  }
+  const pre = document.createElement("pre");
+  pre.className = "fetch-text";
+  pre.textContent = content;
+  parent.appendChild(pre);
+}
+
+function appendError(parent: HTMLElement, msg: string): void {
+  const e = document.createElement("div");
+  e.className = "fetch-err";
+  e.textContent = msg;
+  parent.appendChild(e);
+}
+
+function suggestedFilename(title: string, ext: string): string {
+  const safe = (title || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "etch";
+  return safe.includes(".") ? safe : `${safe}.${ext}`;
+}
+
+function addSaveButton(parent: HTMLElement, bytes: Uint8Array, title: string, ext: string): void {
+  const wrap = document.createElement("div");
+  wrap.style.marginTop = "8px";
+  const btn = document.createElement("button");
+  btn.className = "outlined";
+  btn.textContent = "Save to file…";
+  btn.onclick = async () => {
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+    try {
+      const path = await save({ defaultPath: suggestedFilename(title, ext) });
+      if (!path) { btn.disabled = false; btn.textContent = "Save to file…"; return; }
+      // Tauri command takes Vec<u8>; serialize as plain number array.
+      await invoke("save_bytes", { path, bytes: Array.from(bytes) });
+      btn.textContent = "Saved";
+      const note = document.createElement("div");
+      note.className = "fetch-meta";
+      note.style.color = "var(--green)";
+      note.style.marginTop = "6px";
+      note.textContent = `→ ${path}`;
+      wrap.appendChild(note);
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = "Save to file…";
+      appendError(wrap, `Save failed: ${(e as Error).message ?? String(e)}`);
+    }
+  };
+  wrap.appendChild(btn);
+  parent.appendChild(wrap);
+}

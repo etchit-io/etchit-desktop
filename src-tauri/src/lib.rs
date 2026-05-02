@@ -60,12 +60,18 @@ async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn save_bytes(path: String, bytes: Vec<u8>) -> Result<(), String> {
+    tokio::fs::write(&path, bytes).await.map_err(|e| format!("{e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
-        .invoke_handler(tauri::generate_handler![connect, peer_count, fetch_public, disconnect])
+        .invoke_handler(tauri::generate_handler![connect, peer_count, fetch_public, disconnect, save_bytes])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
