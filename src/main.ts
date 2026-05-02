@@ -6,6 +6,10 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
+import { createAppKit } from "@reown/appkit";
+import { EthersAdapter } from "@reown/appkit-adapter-ethers";
+import { arbitrum } from "@reown/appkit/networks";
+import { BrowserProvider, type Eip1193Provider } from "ethers";
 
 // Tauri v2 with withGlobalTauri=true exposes window.__TAURI__. Either of
 // __TAURI_INTERNALS__ or __TAURI__ being present means we're inside the
@@ -13,6 +17,26 @@ import { save } from "@tauri-apps/plugin-dialog";
 const inTauri =
   typeof (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== "undefined" ||
   typeof (window as unknown as { __TAURI__?: unknown }).__TAURI__ !== "undefined";
+
+// Reown AppKit (WalletConnect v2). Project ID matches the mobile app's
+// REOWN_PROJECT_ID; not secret — embedded in the JS bundle and visible
+// in the APK's BuildConfig regardless. Tauri webviews don't ship with
+// extension wallets, so the QR-pairing path with mobile wallets is the
+// expected flow on desktop.
+const REOWN_PROJECT_ID = "aebccdd6a244efb2ca596326f00b90d2";
+
+const appKit = createAppKit({
+  adapters: [new EthersAdapter()],
+  networks: [arbitrum],
+  projectId: REOWN_PROJECT_ID,
+  metadata: {
+    name: "etchit",
+    description: "Decentralized pastebin on Autonomi",
+    url: "https://etchit.io",
+    icons: ["https://etchit.io/icon.svg"],
+  },
+  features: { analytics: false, email: false, socials: false },
+});
 
 const VERSION_BYTE = 0x01;
 const NONCE_LEN = 12;
@@ -53,16 +77,6 @@ type IndexerTx = {
   blockNumber?: string;
   transactionIndex?: string;
 };
-
-type EthereumProvider = {
-  request(args: { method: string; params?: unknown[] }): Promise<unknown>;
-};
-
-declare global {
-  interface Window {
-    ethereum?: EthereumProvider;
-  }
-}
 
 export {};
 
@@ -204,20 +218,42 @@ async function deriveLibraryKey(signatureHex: string): Promise<Uint8Array> {
   return new Uint8Array(bits);
 }
 
-// ── EIP-1193 wallet flow ─────────────────────────────────────────
+// ── Wallet flow (Reown AppKit) ───────────────────────────────────
+
+type AppKitAccount = { isConnected?: boolean; address?: string };
+
+async function waitForAppKitConnection(): Promise<string> {
+  const current = appKit.getAccount() as AppKitAccount | undefined;
+  if (current?.isConnected && current.address) return current.address;
+
+  // Open modal AND subscribe in parallel — modal stays open until user
+  // either pairs or closes it; subscribe fires on pairing success.
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const unsub = appKit.subscribeAccount((a: AppKitAccount) => {
+      if (settled) return;
+      if (a.isConnected && a.address) {
+        settled = true;
+        unsub();
+        resolve(a.address);
+      }
+    });
+    appKit.open().catch((e: unknown) => {
+      if (settled) return;
+      settled = true;
+      unsub();
+      reject(e);
+    });
+  });
+}
 
 async function connectAndDeriveKey(): Promise<{ wallet: string; key: Uint8Array }> {
-  if (!window.ethereum) {
-    throw new Error("No browser wallet detected. Use the manual key entry below.");
-  }
-  const accounts = await window.ethereum.request({ method: "eth_requestAccounts" }) as string[];
-  if (!accounts || !accounts.length) throw new Error("Wallet returned no accounts.");
-  const wallet = accounts[0];
-  const messageHex = "0x" + bytesToHex(new TextEncoder().encode(SIGN_MESSAGE));
-  const sigHex = await window.ethereum.request({
-    method: "personal_sign",
-    params: [messageHex, wallet],
-  }) as string;
+  const wallet = await waitForAppKitConnection();
+  const walletProvider = appKit.getWalletProvider() as Eip1193Provider | undefined;
+  if (!walletProvider) throw new Error("Wallet connected but no provider available.");
+  const provider = new BrowserProvider(walletProvider);
+  const signer = await provider.getSigner();
+  const sigHex = await signer.signMessage(SIGN_MESSAGE);
   const key = await deriveLibraryKey(sigHex);
   return { wallet, key };
 }
@@ -361,12 +397,9 @@ $("decodeManual").addEventListener("click", async () => {
   }
 });
 
-// Tauri webviews don't ship with browser-extension wallets; users will
-// fall through to manual entry until Phase 2 adds Reown AppKit Web.
-if (!window.ethereum) {
-  setStatus("connectStatus", "No browser wallet detected — expand the manual entry section below.", "err");
-  $<HTMLButtonElement>("connect").disabled = true;
-}
+// AppKit is wired so the Connect button always works — the modal opens
+// a WalletConnect QR for mobile-wallet pairing, which is the desktop
+// path. Manual key entry stays available below as a fallback.
 
 // ── Autonomi network bridge (Phase 2a) ───────────────────────────
 
