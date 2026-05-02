@@ -1018,6 +1018,52 @@ async function decryptDataMap(storageKey: Uint8Array, cipherHex: string): Promis
   }
 }
 
+// ── Etch history (Phase 3d) ──────────────────────────────────────
+//
+// Per-wallet local list of etches made on this device. Mirrors
+// EtchHistory.kt on Android — public entries get the address, private
+// entries get the private-store id so the row can link to the
+// data-map. Stored newest-first.
+
+type HistoryEntry = {
+  ts: number;
+  title: string;
+  isPrivate: boolean;
+  address?: string;       // public etch
+  privateId?: string;     // private etch — points into private store
+};
+
+function historyStoreKey(wallet: string): string {
+  return `etchit:history:v1:${wallet.toLowerCase()}`;
+}
+
+function loadHistory(wallet: string): HistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(historyStoreKey(wallet));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { entries?: HistoryEntry[] };
+    return Array.isArray(parsed.entries) ? parsed.entries : [];
+  } catch { return []; }
+}
+
+function saveHistory(wallet: string, entries: HistoryEntry[]): void {
+  localStorage.setItem(historyStoreKey(wallet), JSON.stringify({ entries }));
+}
+
+function pushHistoryPublic(wallet: string, address: string, title: string): void {
+  const entries = loadHistory(wallet);
+  entries.unshift({ ts: Math.floor(Date.now() / 1000), title, isPrivate: false, address });
+  saveHistory(wallet, entries);
+  renderHistory();
+}
+
+function pushHistoryPrivate(wallet: string, privateId: string, title: string): void {
+  const entries = loadHistory(wallet);
+  entries.unshift({ ts: Math.floor(Date.now() / 1000), title, isPrivate: true, privateId });
+  saveHistory(wallet, entries);
+  renderHistory();
+}
+
 function newId(): string {
   // Random 8-byte hex id for local-only references; collision-tolerant
   // since it's a per-wallet local index.
@@ -1300,10 +1346,14 @@ $("etchBtn").addEventListener("click", async () => {
       setEtchStatus("Done.", "ok");
       showPrivateEtchResult(r.id, r.chunks, title);
       renderPrivateEtches();
+      const w = knownWallet();
+      if (w) pushHistoryPrivate(w, r.id, title);
     } else {
       const r = await etchPublic(text, title);
       setEtchStatus("Done.", "ok");
       showEtchResult(r, title);
+      const w = knownWallet();
+      if (w) pushHistoryPublic(w, r.address, title);
     }
     void refreshAntBalance();
   } catch (e) {
@@ -1566,7 +1616,30 @@ setInterval(() => { void refreshAntBalance(); }, 30_000);
 
 // ── Settings (Phase 3d) ──────────────────────────────────────────
 
+// Mirrors Terms.kt on Android. Same wording across clients.
+const TERMS_TEXT = `By using etchit you agree:
+
+1. You own what you etch. Don't upload material that infringes copyright, violates the law, or that you don't have the right to share.
+
+2. No illegal content. No CSAM, no malware, no content that harms others.
+
+3. Etches are permanent. Once written to the Autonomi network, content cannot be deleted — by you, by us, or by anyone.
+
+4. Your data map is the only key to a private etch. Treat it like a password — keep it secure, don't expose it. Loss or compromise means loss of privacy, and we cannot revoke access.
+
+5. Your wallet, your keys, your costs. etchit never holds your private keys. You sign every transaction yourself, and you pay the gas and ANT cost.
+
+6. No warranty. etchit is provided as-is. The Autonomi network and Arbitrum RPC are operated by third parties; we don't guarantee uptime, data availability, or recoverability.
+
+7. No data recovery. If you lose a private data map, the content is gone. We cannot recover it.
+
+8. You are responsible for what you post. etchit is a client app, not a host. We do not monitor, scan, or moderate content. Misuse is your liability.
+
+9. No refunds for failed uploads. Network errors, app crashes, transaction failures, or any other technical issue during an etch may result in spent ANT or gas with no content stored. Blockchain transactions cannot be reversed and we cannot refund.`;
+
 function initSettingsUI(): void {
+  $("termsText").textContent = TERMS_TEXT;
+
   // Bootstrap peers
   const peersInput = $<HTMLTextAreaElement>("bootstrapPeers");
   const savedPeers = localStorage.getItem("etchit:bootstrap-peers:v1");
@@ -1680,6 +1753,86 @@ function initSettingsUI(): void {
     $("results").innerHTML = "";
     setLibKeyStatus("forgotten — keys re-derive on next sign", "ok");
   });
+
+  // Etch history
+  const setHistoryStatus = (msg: string, cls: "ok" | "err" | "warn" | "" = "") => {
+    const el = $("historyStatus");
+    el.textContent = msg;
+    el.className = "status" + (cls ? ` ${cls}` : "");
+  };
+
+  $("clearHistoryBtn").addEventListener("click", () => {
+    const w = knownWallet();
+    if (!w) { setHistoryStatus("connect wallet first", "err"); return; }
+    localStorage.removeItem(historyStoreKey(w));
+    renderHistory();
+    setHistoryStatus("cleared", "ok");
+  });
+
+  renderHistory();
+}
+
+function relativeTime(unixSec: number): string {
+  const diff = Math.floor(Date.now() / 1000) - unixSec;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return new Date(unixSec * 1000).toLocaleDateString();
+}
+
+function renderHistory(): void {
+  const root = $("historyList");
+  root.innerHTML = "";
+  const wallet = knownWallet();
+  if (!wallet) {
+    const div = document.createElement("div");
+    div.className = "empty";
+    div.textContent = "Connect wallet to see etch history.";
+    root.appendChild(div);
+    return;
+  }
+  const entries = loadHistory(wallet);
+  if (!entries.length) {
+    const div = document.createElement("div");
+    div.className = "empty";
+    div.textContent = "No etches yet.";
+    root.appendChild(div);
+    return;
+  }
+  for (const e of entries) {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = (e.isPrivate ? "🔒 " : "") + (e.title || "Untitled");
+    row.appendChild(title);
+
+    const meta = document.createElement("div");
+    meta.className = "addr";
+    if (e.isPrivate) {
+      meta.textContent = `private id: ${e.privateId} · ${relativeTime(e.ts)}`;
+    } else {
+      meta.textContent = `${e.address} · ${relativeTime(e.ts)}`;
+    }
+    row.appendChild(meta);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    if (!e.isPrivate && e.address) {
+      const copyAddr = document.createElement("button");
+      copyAddr.className = "outlined";
+      copyAddr.textContent = "Copy address";
+      copyAddr.onclick = () => {
+        navigator.clipboard.writeText(e.address!);
+      };
+      actions.appendChild(copyAddr);
+    }
+
+    row.appendChild(actions);
+    root.appendChild(row);
+  }
 }
 
 initSettingsUI();
@@ -1697,6 +1850,7 @@ function maybeRerenderPrivate(): void {
   if (wallet !== lastRenderedWallet) {
     lastRenderedWallet = wallet;
     renderPrivateEtches();
+    renderHistory();
   }
 }
 

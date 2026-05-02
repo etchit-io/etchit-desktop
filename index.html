@@ -114,6 +114,21 @@
       </details>
 
       <details class="settings-block">
+        <summary>Etch history</summary>
+        <p class="sub">Local list of etches made on this device. Newest first.</p>
+        <div id="historyList"></div>
+        <div class="controls" style="margin-top: 12px;">
+          <button id="clearHistoryBtn" class="outlined">Clear history</button>
+          <span id="historyStatus" class="status"></span>
+        </div>
+      </details>
+
+      <details class="settings-block">
+        <summary>Terms</summary>
+        <pre id="termsText" class="terms-text"></pre>
+      </details>
+
+      <details class="settings-block">
         <summary>Library key — backup / restore</summary>
         <p class="sub">The 32-byte AES key derived from your wallet. Shared across mobile + desktop + web viewer for the same wallet. Anyone with this key plus your wallet address can read your library.</p>
         <div class="controls" style="margin-top: 6px;">
