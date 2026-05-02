@@ -1861,11 +1861,10 @@ class MainActivity : AppCompatActivity() {
                     })
 
                     container.addView(outlinedButton("Add by address") {
-                        promptAddByAddress { addr, title, asMine ->
+                        promptAddByAddress { addr, title ->
                             lifecycleScope.launch {
                                 try {
-                                    val action = if (asMine) WireEntry.ACTION_ADD else WireEntry.ACTION_BOOKMARK
-                                    val txHash = libraryController.addByAddress(chainId, wallet, addr, title, action)
+                                    val txHash = libraryController.addByAddress(chainId, wallet, addr, title, WireEntry.ACTION_ADD)
                                     showStatus("Synced: ${txHash.take(10)}…")
                                     render()
                                 } catch (e: Exception) {
@@ -1879,8 +1878,8 @@ class MainActivity : AppCompatActivity() {
                         bulkAddFromHistoryDialog(chainId, wallet) { render() }
                     })
 
-                    container.addView(outlinedButton("Bookmark multiple addresses") {
-                        bulkBookmarkDialog(chainId, wallet) { render() }
+                    container.addView(outlinedButton("Add multiple by address") {
+                        bulkAddByAddressDialog(chainId, wallet) { render() }
                     })
 
                     container.addView(outlinedButton("Back up library key") {
@@ -1938,7 +1937,7 @@ class MainActivity : AppCompatActivity() {
             isClickable = true
             isFocusable = true
         }
-        val titleLine = (if (entry.isBookmark) "★ " else "") + entry.title.ifEmpty { "Untitled" }
+        val titleLine = entry.title.ifEmpty { "Untitled" }
         row.addView(TextView(this).apply {
             text = titleLine
             setTextColor(BONE)
@@ -2239,7 +2238,7 @@ class MainActivity : AppCompatActivity() {
         return out to bad
     }
 
-    private fun bulkBookmarkDialog(
+    private fun bulkAddByAddressDialog(
         chainId: String,
         walletAddress: String,
         onDone: () -> Unit,
@@ -2251,7 +2250,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(pad, pad, pad, pad)
         }
         layout.addView(TextView(this).apply {
-            text = "Paste 64-char etch addresses, one per line. Optional: add a space and a title after each address. All entries are saved as bookmarks (★)."
+            text = "Paste 64-char etch addresses, one per line. Optional: add a space and a title after each address."
             setTextColor(ASH)
             textSize = 12f
             layoutParams = LinearLayout.LayoutParams(
@@ -2270,9 +2269,9 @@ class MainActivity : AppCompatActivity() {
         layout.addView(input)
 
         AlertDialog.Builder(this)
-            .setTitle("Bookmark multiple addresses")
+            .setTitle("Add multiple by address")
             .setView(layout)
-            .setPositiveButton("Bookmark") { _, _ ->
+            .setPositiveButton("Add") { _, _ ->
                 val (entries, badLines) = parseAddressList(input.text.toString())
                 if (entries.isEmpty()) {
                     showStatus("No valid addresses found", isError = true)
@@ -2280,16 +2279,16 @@ class MainActivity : AppCompatActivity() {
                 }
                 lifecycleScope.launch {
                     try {
-                        showStatus("Bookmarking ${entries.size}…")
+                        showStatus("Adding ${entries.size}…")
                         val txHashes = libraryController.addMultiple(
-                            chainId, walletAddress, entries, WireEntry.ACTION_BOOKMARK,
+                            chainId, walletAddress, entries, WireEntry.ACTION_ADD,
                         )
                         val plural = if (txHashes.size > 1) "${txHashes.size} txs" else "1 tx"
                         val skip = if (badLines.isNotEmpty()) " (skipped ${badLines.size} invalid line${if (badLines.size > 1) "s" else ""})" else ""
-                        showStatus("Bookmarked ${entries.size} in $plural$skip")
+                        showStatus("Added ${entries.size} in $plural$skip")
                         onDone()
                     } catch (e: Exception) {
-                        showStatus("Bulk bookmark failed: ${e.message}", isError = true)
+                        showStatus("Bulk add failed: ${e.message}", isError = true)
                     }
                 }
             }
@@ -2297,7 +2296,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun promptAddByAddress(onSubmit: (String, String, Boolean) -> Unit) {
+    private fun promptAddByAddress(onSubmit: (String, String) -> Unit) {
         val dp = resources.displayMetrics.density
         val pad = (16 * dp).toInt()
         val layout = LinearLayout(this).apply {
@@ -2312,14 +2311,8 @@ class MainActivity : AppCompatActivity() {
             hint = "Title (optional)"
             setSingleLine(true)
         }
-        val asMineCheckbox = android.widget.CheckBox(this).apply {
-            text = "I created this etch (uncheck to bookmark someone else's)"
-            setTextColor(BONE)
-            isChecked = false
-        }
         layout.addView(addrInput)
         layout.addView(titleInput)
-        layout.addView(asMineCheckbox)
         AlertDialog.Builder(this)
             .setTitle("Add to library")
             .setView(layout)
@@ -2327,7 +2320,6 @@ class MainActivity : AppCompatActivity() {
                 onSubmit(
                     addrInput.text.toString().trim(),
                     titleInput.text.toString().trim(),
-                    asMineCheckbox.isChecked,
                 )
             }
             .setNegativeButton("Cancel", null)

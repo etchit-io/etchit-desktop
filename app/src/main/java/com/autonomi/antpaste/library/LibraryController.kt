@@ -91,7 +91,7 @@ class LibraryController(
         walletAddress: String,
         etchAddr: String,
         title: String,
-        action: String = WireEntry.ACTION_BOOKMARK,
+        action: String = WireEntry.ACTION_ADD,
     ): String {
         require(action == WireEntry.ACTION_ADD || action == WireEntry.ACTION_BOOKMARK) {
             "action must be add or bookmark"
