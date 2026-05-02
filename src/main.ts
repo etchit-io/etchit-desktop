@@ -266,6 +266,10 @@ async function waitForAppKitConnection(): Promise<string> {
   });
 }
 
+// Cached library context — populated after Connect wallet succeeds and
+// reused for library writes (auto-add after etch).
+let currentLibrary: { wallet: string; key: Uint8Array } | null = null;
+
 async function connectAndDeriveKey(): Promise<{ wallet: string; key: Uint8Array }> {
   const wallet = await waitForAppKitConnection();
   const walletProvider = appKit.getWalletProvider() as Eip1193Provider | undefined;
@@ -280,7 +284,67 @@ async function connectAndDeriveKey(): Promise<{ wallet: string; key: Uint8Array 
     params: [messageHex, wallet],
   })) as string;
   const key = await deriveLibraryKey(sigHex);
+  currentLibrary = { wallet, key };
   return { wallet, key };
+}
+
+// ── Library write (Phase 3b) ─────────────────────────────────────
+//
+// Mirrors LibraryCrypto.seal + LibrarySync.sendBatch on Android. Encodes
+// a one-entry payload, AES-GCM-seals it with bucket padding, computes the
+// per-tx recipient, and sends a 0-value Arbitrum tx via the wallet.
+
+async function sealLibraryBatch(key: Uint8Array, payload: Uint8Array): Promise<Uint8Array | null> {
+  let bucketId = -1;
+  let bucketSize = 0;
+  for (let i = 0; i < BUCKETS.length; i++) {
+    if (4 + payload.length <= BUCKETS[i]) { bucketId = i; bucketSize = BUCKETS[i]; break; }
+  }
+  if (bucketId < 0) return null;
+
+  const frame = new Uint8Array(bucketSize);
+  new DataView(frame.buffer).setUint32(0, payload.length, true);
+  frame.set(payload, 4);
+
+  const nonce = crypto.getRandomValues(new Uint8Array(NONCE_LEN));
+  const aesKey = await crypto.subtle.importKey("raw", key, { name: "AES-GCM" }, false, ["encrypt"]);
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, aesKey, frame),
+  );
+
+  const blob = new Uint8Array(2 + NONCE_LEN + ct.length);
+  blob[0] = VERSION_BYTE;
+  blob[1] = bucketId;
+  blob.set(nonce, 2);
+  blob.set(ct, 2 + NONCE_LEN);
+  return blob;
+}
+
+type LibraryAction = "add" | "bookmark" | "hide";
+
+async function addToLibrary(addr: string, title: string, action: LibraryAction = "add"): Promise<string> {
+  if (!currentLibrary) throw new Error("Library not unlocked — connect wallet first.");
+  const walletProvider = appKit.getWalletProvider() as Eip1193Provider | undefined;
+  if (!walletProvider) throw new Error("Wallet provider unavailable.");
+
+  const wireEntry = {
+    kind: "public",
+    addr: addr.toLowerCase(),
+    title,
+    ts: Math.floor(Date.now() / 1000),
+    action,
+  };
+  const payloadJson = JSON.stringify({ v: 1, entries: [wireEntry] });
+  const payload = new TextEncoder().encode(payloadJson);
+  const blob = await sealLibraryBatch(currentLibrary.key, payload);
+  if (!blob) throw new Error("Library entry too large for max bucket.");
+
+  const recipient = await recipientForBlob(blob);
+  const calldata = "0x" + bytesToHex(blob);
+  return (await walletProvider.request({
+    method: "eth_sendTransaction",
+    params: [{ from: currentLibrary.wallet, to: recipient, data: calldata, value: "0x0" }],
+  })) as string;
 }
 
 // ── UI ───────────────────────────────────────────────────────────
@@ -747,7 +811,7 @@ async function etchPublic(text: string, title: string): Promise<PublicEtchResult
   });
 }
 
-function showEtchResult(result: PublicEtchResult): void {
+function showEtchResult(result: PublicEtchResult, title: string): void {
   const root = $("etchResult");
   root.innerHTML = "";
   const panel = document.createElement("div");
@@ -764,9 +828,16 @@ function showEtchResult(result: PublicEtchResult): void {
   addr.textContent = result.address;
   panel.appendChild(addr);
 
+  const libStatus = document.createElement("div");
+  libStatus.className = "fetch-meta";
+  libStatus.style.color = "var(--ash)";
+  libStatus.style.marginBottom = "8px";
+  panel.appendChild(libStatus);
+
   const actions = document.createElement("div");
   actions.style.display = "flex";
   actions.style.gap = "8px";
+  actions.style.flexWrap = "wrap";
 
   const copyBtn = document.createElement("button");
   copyBtn.className = "outlined";
@@ -776,6 +847,41 @@ function showEtchResult(result: PublicEtchResult): void {
     setEtchStatus("Address copied", "ok");
   };
   actions.appendChild(copyBtn);
+
+  const addBtn = document.createElement("button");
+  addBtn.className = "outlined";
+  addBtn.textContent = "Add to library";
+  addBtn.onclick = async () => {
+    addBtn.disabled = true;
+    libStatus.style.color = "var(--ash)";
+    try {
+      if (!currentLibrary) {
+        // Derive on demand — same flow as Connect wallet, but without
+        // running the full library decode after.
+        libStatus.textContent = "Sign library-derive message in your wallet…";
+        await connectAndDeriveKey();
+      }
+      libStatus.textContent = "Sign library update in your wallet…";
+      const txHash = await addToLibrary(result.address, title || "");
+      libStatus.style.color = "var(--copper)";
+      libStatus.textContent = `Waiting for confirmation (${txHash.slice(0, 10)}…)`;
+      const receipt = await rpc.waitForTransaction(txHash);
+      if (receipt?.status === 1) {
+        libStatus.style.color = "var(--green)";
+        libStatus.textContent = `Added to library · ${txHash.slice(0, 10)}…`;
+        addBtn.textContent = "Added";
+      } else {
+        libStatus.style.color = "var(--red)";
+        libStatus.textContent = `Library update reverted (${txHash})`;
+        addBtn.disabled = false;
+      }
+    } catch (e) {
+      libStatus.style.color = "var(--red)";
+      libStatus.textContent = `Library add failed: ${(e as Error).message ?? String(e)}`;
+      addBtn.disabled = false;
+    }
+  };
+  actions.appendChild(addBtn);
 
   panel.appendChild(actions);
   root.appendChild(panel);
@@ -792,7 +898,7 @@ $("etchBtn").addEventListener("click", async () => {
   try {
     const result = await etchPublic(text, title);
     setEtchStatus("Done.", "ok");
-    showEtchResult(result);
+    showEtchResult(result, title);
   } catch (e) {
     setEtchStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
   } finally {
