@@ -57,6 +57,18 @@
         <span id="connectStatus" class="status"></span>
       </div>
 
+      <details class="add-by-addr">
+        <summary>+ Add by address</summary>
+        <label for="addAddr">Address (64 hex)</label>
+        <input id="addAddr" type="text" placeholder="00ac7cbe…" autocomplete="off" spellcheck="false" />
+        <label for="addTitle">Title (optional)</label>
+        <input id="addTitle" type="text" placeholder="e.g. index.html" autocomplete="off" />
+        <div class="controls" style="margin-top: 12px;">
+          <button id="addByAddrBtn">Add to library</button>
+          <span id="addByAddrStatus" class="status"></span>
+        </div>
+      </details>
+
       <details id="manualSection">
         <summary>Or enter key manually</summary>
         <label for="wallet">Wallet address</label>

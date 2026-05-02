@@ -477,7 +477,7 @@ function render(entries: LibraryEntry[]): void {
   }
   for (const e of visible) {
     const row = document.createElement("div");
-    row.className = "row" + (e.bookmark ? " bookmark" : "");
+    row.className = "row";
 
     const title = document.createElement("div");
     title.className = "title";
@@ -526,20 +526,126 @@ function render(entries: LibraryEntry[]): void {
       actions.appendChild(copyCmd);
     }
 
+    const hideBtn = document.createElement("button");
+    hideBtn.className = "outlined";
+    hideBtn.textContent = "Hide";
+    hideBtn.onclick = () => {
+      // Two-step inline confirm — hide costs gas (Arbitrum tx) and
+      // can be reversed only with another tx (re-add).
+      const original = actions.cloneNode(true);
+      actions.innerHTML = "";
+
+      const warn = document.createElement("div");
+      warn.className = "fetch-meta";
+      warn.style.color = "var(--copper)";
+      warn.style.marginBottom = "6px";
+      warn.textContent = "Hide writes a tx to Arbitrum (gas). The entry won't show after the next sync. Reversible by adding it again.";
+      actions.appendChild(warn);
+
+      const btnRow = document.createElement("div");
+      btnRow.style.display = "flex";
+      btnRow.style.gap = "6px";
+
+      const cancel = document.createElement("button");
+      cancel.className = "outlined";
+      cancel.textContent = "Cancel";
+      cancel.onclick = () => actions.replaceWith(original as HTMLElement);
+      btnRow.appendChild(cancel);
+
+      const confirm = document.createElement("button");
+      confirm.className = "outlined";
+      confirm.style.borderColor = "var(--copper)";
+      confirm.style.color = "var(--copper)";
+      confirm.textContent = "Hide entry";
+      confirm.onclick = async () => {
+        confirm.disabled = true;
+        confirm.textContent = "Signing…";
+        try {
+          const txHash = await addToLibrary(e.addr, e.title || "", "hide");
+          confirm.textContent = `Waiting (${txHash.slice(0, 10)}…)`;
+          await rpc.waitForTransaction(txHash);
+          // Optimistic local update — the BlockScout indexer will catch
+          // up in 30-60s; meanwhile mark hidden in the in-memory cache
+          // so the row disappears immediately.
+          currentLibraryEntries = currentLibraryEntries.map((x) =>
+            x.addr === e.addr ? { ...x, hidden: true } : x,
+          );
+          render(currentLibraryEntries);
+          setStatus("status", "Entry hidden", "ok");
+        } catch (err) {
+          actions.replaceWith(original as HTMLElement);
+          setStatus("status", `Hide failed: ${(err as Error).message ?? String(err)}`, "err");
+        }
+      };
+      btnRow.appendChild(confirm);
+
+      actions.appendChild(btnRow);
+    };
+    actions.appendChild(hideBtn);
+
     row.appendChild(actions);
     root.appendChild(row);
   }
 }
+
+// Cache of decoded library entries — kept in module scope so optimistic
+// add / hide can mutate the rendered list without re-running the full
+// BlockScout decode (which won't see new txs until the indexer catches
+// up, ~30-60s).
+let currentLibraryEntries: LibraryEntry[] = [];
 
 async function runDecode(wallet: string, keyBytes: Uint8Array): Promise<void> {
   const indexer = $<HTMLInputElement>("indexer").value.trim();
   setStatus("status", "Fetching from indexer…");
   $("results").innerHTML = "";
   const entries = await fetchAndDecode(wallet, keyBytes, indexer);
+  currentLibraryEntries = entries;
   render(entries);
   const visible = entries.filter((e) => !e.hidden).length;
   setStatus("status", `Decoded ${entries.length} entries (${visible} visible).`, "ok");
 }
+
+$("addByAddrBtn").addEventListener("click", async () => {
+  const rawAddr = $<HTMLInputElement>("addAddr").value.trim().toLowerCase().replace(/^0x/, "");
+  const title = $<HTMLInputElement>("addTitle").value.trim();
+  const setAddStatus = (msg: string, cls: "ok" | "err" | "warn" | "" = "") => {
+    const el = $("addByAddrStatus");
+    el.textContent = msg;
+    el.className = "status" + (cls ? ` ${cls}` : "");
+  };
+  if (!/^[0-9a-f]{64}$/.test(rawAddr)) {
+    setAddStatus("Invalid address (need 64 hex chars).", "err");
+    return;
+  }
+  const btn = $<HTMLButtonElement>("addByAddrBtn");
+  btn.disabled = true;
+  setAddStatus("Sending tx…", "warn");
+  try {
+    const txHash = await addToLibrary(rawAddr, title, "add");
+    setAddStatus(`Waiting (${txHash.slice(0, 10)}…)`, "warn");
+    await rpc.waitForTransaction(txHash);
+    // Optimistic merge: replace any existing entry for this addr (last
+    // action wins per spec replay) and re-render.
+    const newEntry: LibraryEntry = {
+      addr: rawAddr,
+      title,
+      ts: Math.floor(Date.now() / 1000),
+      bookmark: false,
+      hidden: false,
+    };
+    currentLibraryEntries = currentLibraryEntries
+      .filter((e) => e.addr !== rawAddr)
+      .concat(newEntry);
+    render(currentLibraryEntries);
+    setAddStatus("Added.", "ok");
+    $<HTMLInputElement>("addAddr").value = "";
+    $<HTMLInputElement>("addTitle").value = "";
+  } catch (e) {
+    setAddStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 $("toggleKey").addEventListener("click", () => {
   const inp = $<HTMLInputElement>("key");

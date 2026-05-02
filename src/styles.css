@@ -168,10 +168,6 @@ details summary {
   flex-wrap: wrap;
 }
 
-.row.bookmark .title::before {
-  content: "★ ";
-  color: var(--copper);
-}
 
 .empty {
   color: var(--ash);
