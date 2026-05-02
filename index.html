@@ -17,6 +17,24 @@
 
       <div id="network" class="net-bar">Network: <span id="netStatus">starting…</span></div>
 
+      <section class="etch-panel">
+        <h2>Create an etch</h2>
+        <p class="sub" style="margin-bottom: 12px;">
+          Wallet must be connected. Public etches anyone with the resulting address can fetch.
+        </p>
+        <label for="etchTitle">Title (optional)</label>
+        <input id="etchTitle" type="text" placeholder="e.g. release notes" autocomplete="off" />
+        <label for="etchText">Content</label>
+        <textarea id="etchText" rows="6" placeholder="Paste text here. Multi-line is fine."></textarea>
+        <div class="controls">
+          <button id="etchBtn">Etch</button>
+          <span id="etchStatus" class="status"></span>
+        </div>
+        <div id="etchResult"></div>
+      </section>
+
+      <h2 class="section-title">Library</h2>
+
       <div class="controls" style="margin-top: 0; margin-bottom: 8px;">
         <button id="connect">Connect wallet</button>
         <span id="connectStatus" class="status"></span>

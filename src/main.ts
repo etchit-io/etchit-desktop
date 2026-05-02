@@ -9,7 +9,26 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { createAppKit } from "@reown/appkit";
 import { EthersAdapter } from "@reown/appkit-adapter-ethers";
 import { arbitrum } from "@reown/appkit/networks";
-import { BrowserProvider, type Eip1193Provider } from "ethers";
+import { Interface, JsonRpcProvider, type Eip1193Provider } from "ethers";
+
+// EVM constants — match BuildConfig in etchit-android-v3/app/build.gradle.kts.
+const ARBITRUM_RPC = "https://arb1.arbitrum.io/rpc";
+const ANT_TOKEN_ADDRESS = "0xa78d8321B20c4Ef90eCd72f2588AA985A4BDb684";
+const VAULT_ADDRESS = "0x9A3EcAc693b699Fc0B2B6A50B5549e50c2320A26";
+const ARBITRUM_CHAIN_ID = 42161;
+const SESSION_BUDGET_ATTO = 20_000_000_000_000_000_000n; // 20 ANT
+
+const ERC20_ABI = [
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+];
+const VAULT_ABI = [
+  "function payForQuotes(tuple(address rewardsAddress, uint256 amount, bytes32 quoteHash)[] payments)",
+];
+const erc20Iface = new Interface(ERC20_ABI);
+const vaultIface = new Interface(VAULT_ABI);
+
+const rpc = new JsonRpcProvider(ARBITRUM_RPC, ARBITRUM_CHAIN_ID, { staticNetwork: true });
 
 // Tauri v2 with withGlobalTauri=true exposes window.__TAURI__. Either of
 // __TAURI_INTERNALS__ or __TAURI__ being present means we're inside the
@@ -251,9 +270,15 @@ async function connectAndDeriveKey(): Promise<{ wallet: string; key: Uint8Array 
   const wallet = await waitForAppKitConnection();
   const walletProvider = appKit.getWalletProvider() as Eip1193Provider | undefined;
   if (!walletProvider) throw new Error("Wallet connected but no provider available.");
-  const provider = new BrowserProvider(walletProvider);
-  const signer = await provider.getSigner();
-  const sigHex = await signer.signMessage(SIGN_MESSAGE);
+  // Sign via raw EIP-1193 personal_sign — ethers' BrowserProvider would
+  // multiplex extra eth_chainId/eth_accounts queries through the same
+  // WalletConnect channel, which has triggered "Invalid Id" responses
+  // on MetaMask Mobile.
+  const messageHex = "0x" + bytesToHex(new TextEncoder().encode(SIGN_MESSAGE));
+  const sigHex = (await walletProvider.request({
+    method: "personal_sign",
+    params: [messageHex, wallet],
+  })) as string;
   const key = await deriveLibraryKey(sigHex);
   return { wallet, key };
 }
@@ -635,6 +660,145 @@ function renderText(parent: HTMLElement, title: string, content: string): void {
   pre.textContent = content;
   parent.appendChild(pre);
 }
+
+// ── Etch creation (Phase 3a) ─────────────────────────────────────
+
+type PaymentDto = { quote_hash: string; rewards_address: string; amount: string };
+type PreparedPublicEtch = { upload_id: string; payments: PaymentDto[]; total_amount: string; data_map_address: string };
+type PublicEtchResult = { address: string; chunks_stored: number };
+
+function setEtchStatus(msg: string, cls: "ok" | "err" | "warn" | "" = ""): void {
+  const el = $("etchStatus");
+  el.textContent = msg;
+  el.className = "status" + (cls ? ` ${cls}` : "");
+}
+
+function buildEnvelope(content: string, title: string): Uint8Array {
+  // Mirror PasteUtils.buildEnvelope on Android — deterministic JSON, no
+  // timestamp (content is content-addressed; including time would break
+  // network-side dedup of identical (content, title) pairs).
+  const escape = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t");
+  const json = `{"v":1,"meta":{"title":"${escape(title)}","lang":""},"content":"${escape(content)}"}`;
+  return new TextEncoder().encode(json);
+}
+
+async function ethCall(to: string, data: string): Promise<string> {
+  return await rpc.call({ to, data });
+}
+
+async function sendTx(walletProvider: Eip1193Provider, from: string, to: string, data: string): Promise<string> {
+  return (await walletProvider.request({
+    method: "eth_sendTransaction",
+    params: [{ from, to, data }],
+  })) as string;
+}
+
+async function etchPublic(text: string, title: string): Promise<PublicEtchResult> {
+  if (!inTauri) throw new Error("Etching requires the desktop app (no FFI in plain browser).");
+
+  const account = appKit.getAccount() as AppKitAccount | undefined;
+  if (!account?.isConnected || !account.address) throw new Error("Connect a wallet first.");
+  const userAddress = account.address;
+
+  const walletProvider = appKit.getWalletProvider() as Eip1193Provider | undefined;
+  if (!walletProvider) throw new Error("Wallet provider unavailable.");
+
+  const data = buildEnvelope(text, title);
+
+  setEtchStatus("Collecting quotes from network…", "warn");
+  const prepared = await invoke<PreparedPublicEtch>("prepare_public_etch", { data: Array.from(data) });
+  const totalAtto = BigInt(prepared.total_amount);
+
+  setEtchStatus("Checking ANT allowance…", "warn");
+  const allowanceCalldata = erc20Iface.encodeFunctionData("allowance", [userAddress, VAULT_ADDRESS]);
+  const allowanceHex = await ethCall(ANT_TOKEN_ADDRESS, allowanceCalldata);
+  const allowance = BigInt(allowanceHex);
+  const needsApproval = allowance < totalAtto;
+
+  if (needsApproval) {
+    setEtchStatus("Approve ANT in your wallet…", "warn");
+    const approveAmount = SESSION_BUDGET_ATTO > totalAtto ? SESSION_BUDGET_ATTO : totalAtto;
+    const approveCalldata = erc20Iface.encodeFunctionData("approve", [VAULT_ADDRESS, approveAmount]);
+    const approveHash = await sendTx(walletProvider, userAddress, ANT_TOKEN_ADDRESS, approveCalldata);
+    setEtchStatus(`Waiting for approve confirmation (${approveHash.slice(0, 10)}…)`, "warn");
+    const approveReceipt = await rpc.waitForTransaction(approveHash);
+    if (approveReceipt?.status !== 1) throw new Error(`ANT approve reverted (${approveHash})`);
+  }
+
+  setEtchStatus("Sign payment in your wallet…", "warn");
+  const ensureHex = (s: string) => (s.startsWith("0x") || s.startsWith("0X") ? s : "0x" + s);
+  const vaultPayments = prepared.payments.map((p) => [
+    ensureHex(p.rewards_address),
+    BigInt(p.amount),
+    ensureHex(p.quote_hash),
+  ]);
+  const payCalldata = vaultIface.encodeFunctionData("payForQuotes", [vaultPayments]);
+  const payHash = await sendTx(walletProvider, userAddress, VAULT_ADDRESS, payCalldata);
+  setEtchStatus(`Waiting for payment confirmation (${payHash.slice(0, 10)}…)`, "warn");
+  const payReceipt = await rpc.waitForTransaction(payHash);
+  if (payReceipt?.status !== 1) throw new Error(`payForQuotes reverted (${payHash})`);
+
+  setEtchStatus("Finalizing upload — pushing chunks to network…", "warn");
+  const txHashes: Record<string, string> = {};
+  for (const p of prepared.payments) txHashes[p.quote_hash] = payHash;
+  return await invoke<PublicEtchResult>("finalize_public_etch", {
+    uploadId: prepared.upload_id,
+    txHashes,
+  });
+}
+
+function showEtchResult(result: PublicEtchResult): void {
+  const root = $("etchResult");
+  root.innerHTML = "";
+  const panel = document.createElement("div");
+  panel.className = "etch-result";
+
+  const heading = document.createElement("div");
+  heading.style.color = "var(--green)";
+  heading.style.fontWeight = "500";
+  heading.textContent = `Etched · ${result.chunks_stored} chunks stored`;
+  panel.appendChild(heading);
+
+  const addr = document.createElement("div");
+  addr.className = "etch-result-addr";
+  addr.textContent = result.address;
+  panel.appendChild(addr);
+
+  const actions = document.createElement("div");
+  actions.style.display = "flex";
+  actions.style.gap = "8px";
+
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "outlined";
+  copyBtn.textContent = "Copy address";
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(result.address);
+    setEtchStatus("Address copied", "ok");
+  };
+  actions.appendChild(copyBtn);
+
+  panel.appendChild(actions);
+  root.appendChild(panel);
+}
+
+$("etchBtn").addEventListener("click", async () => {
+  const text = $<HTMLTextAreaElement>("etchText").value;
+  const title = $<HTMLInputElement>("etchTitle").value.trim();
+  if (!text.trim()) { setEtchStatus("Content is empty.", "err"); return; }
+
+  const btn = $<HTMLButtonElement>("etchBtn");
+  btn.disabled = true;
+  $("etchResult").innerHTML = "";
+  try {
+    const result = await etchPublic(text, title);
+    setEtchStatus("Done.", "ok");
+    showEtchResult(result);
+  } catch (e) {
+    setEtchStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 function appendError(parent: HTMLElement, msg: string): void {
   const e = document.createElement("div");

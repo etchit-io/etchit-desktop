@@ -233,3 +233,59 @@ code {
   font-size: 12px;
 }
 
+h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 12px;
+  color: var(--bone);
+}
+
+.section-title {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid #1a1a1a;
+}
+
+.etch-panel {
+  margin-bottom: 8px;
+  padding: 16px;
+  background: var(--ink-2);
+  border: 1px solid #1f1f1f;
+  border-radius: 6px;
+}
+
+textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--ink-3);
+  color: var(--bone);
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  font: inherit;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+
+textarea:focus { outline: 0; border-color: var(--copper); }
+
+#etchResult {
+  margin-top: 12px;
+}
+
+.etch-result {
+  padding: 12px;
+  background: var(--ink-3);
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.etch-result-addr {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--copper);
+  word-break: break-all;
+  margin: 4px 0 8px;
+}
+
