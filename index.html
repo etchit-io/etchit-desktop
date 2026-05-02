@@ -38,7 +38,7 @@
         <textarea id="etchText" rows="6" placeholder="Paste text here. Multi-line is fine."></textarea>
         <label class="checkbox">
           <input id="etchPrivate" type="checkbox" />
-          <span>Private (data-map stored locally, not on the network)</span>
+          <span>Private — data-map kept on this device, encrypted with your wallet key. <strong>Lose the wallet, lose access.</strong></span>
         </label>
         <div class="controls">
           <button id="etchBtn">Etch</button>
@@ -47,10 +47,7 @@
         <div id="etchResult"></div>
       </section>
 
-      <h2 class="section-title">Private etches</h2>
-      <p class="sub" style="margin-bottom: 12px;">
-        Stored on this device only. Encrypted at rest with a wallet-derived key.
-      </p>
+      <h2 class="section-title">Private etches <span class="info" data-tip="Stored on this device only. Encrypted at rest with a key derived from your wallet signature. If you lose access to the wallet (no seed phrase, no recovery), the encryption key cannot be re-derived and the entries become permanently unreadable. There is no server backup.">i</span></h2>
       <div id="privateList" class="results"></div>
 
       <h2 class="section-title">Library <span class="info" data-tip="Pulls your encrypted library entries from Arbitrum and decrypts them locally. Uses your wallet to sign a derive-key message (same as the mobile app), no copy-paste of the library key needed.">i</span></h2>

@@ -1192,8 +1192,20 @@ function showPrivateEtchResult(id: string, chunks: number, title: string): void 
   sub.className = "fetch-meta";
   sub.style.color = "var(--ash)";
   sub.style.marginTop = "4px";
-  sub.textContent = `id: ${id}${title ? ` · title: ${title}` : ""} · only this device can fetch it`;
+  sub.textContent = `id: ${id}${title ? ` · title: ${title}` : ""}`;
   panel.appendChild(sub);
+
+  const warn = document.createElement("div");
+  warn.style.marginTop = "10px";
+  warn.style.padding = "8px 10px";
+  warn.style.borderLeft = "2px solid var(--copper)";
+  warn.style.fontSize = "12px";
+  warn.style.color = "var(--bone)";
+  warn.innerHTML =
+    "<strong>Wallet-dependent.</strong> The data-map is encrypted with a key derived from " +
+    "your wallet signature. If you lose access to this wallet (no seed phrase / no recovery), " +
+    "this etch becomes permanently unreadable — there is no server backup.";
+  panel.appendChild(warn);
 
   root.appendChild(panel);
 }
