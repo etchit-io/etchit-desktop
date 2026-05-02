@@ -11,6 +11,17 @@
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
+    <div id="termsGate" class="terms-gate" hidden>
+      <div class="terms-modal">
+        <h2>etch<span class="brand-mark">/</span>it · terms</h2>
+        <p class="sub" style="margin: 4px 0 12px;">Read once, then we get out of your way.</p>
+        <pre id="termsGateText" class="terms-text"></pre>
+        <div class="controls" style="margin-top: 16px;">
+          <button id="termsAcceptBtn">I agree</button>
+        </div>
+      </div>
+    </div>
+
     <main>
       <h1 class="brand">etch<span class="brand-mark">/</span>it</h1>
       <p class="sub">
@@ -38,7 +49,7 @@
         <textarea id="etchText" rows="6" placeholder="Paste text here. Multi-line is fine."></textarea>
         <label class="checkbox">
           <input id="etchPrivate" type="checkbox" />
-          <span>Private — data-map kept on this device, encrypted with your wallet key. <strong>Lose the wallet, lose access.</strong></span>
+          <span>Private etch<br><span class="checkbox-sub">Data-map kept on this device.<br>Encrypted with your wallet key. <strong>Lose the wallet, lose access.</strong></span></span>
         </label>
         <div class="controls">
           <button id="etchBtn">Etch</button>
@@ -69,21 +80,6 @@
         </div>
       </details>
 
-      <details id="manualSection">
-        <summary>Or enter key manually</summary>
-        <label for="wallet">Wallet address</label>
-        <input id="wallet" type="text" placeholder="0x… (40 hex chars)" autocomplete="off" spellcheck="false" />
-
-        <label for="key">Library key (Settings → Library → Back up library key)</label>
-        <div style="display: flex; gap: 8px;">
-          <input id="key" type="password" placeholder="64 hex chars" autocomplete="new-password" spellcheck="false" style="flex: 1;" />
-          <button id="toggleKey" type="button" class="outlined" style="padding: 0 10px;">Show</button>
-        </div>
-        <div class="controls" style="margin-top: 12px;">
-          <button id="decodeManual">Decode library</button>
-        </div>
-      </details>
-
       <div class="controls" style="margin-top: 18px;">
         <span id="status" class="status"></span>
       </div>
@@ -91,6 +87,16 @@
       <div class="results" id="results"></div>
 
       <h2 class="section-title">Settings <span class="info" data-tip="Per-wallet, persisted in this app's local storage. Bootstrap peers and indexer URL are also configurable on mobile.">i</span></h2>
+
+      <details class="settings-block">
+        <summary>Etch history</summary>
+        <p class="sub">Local list of etches made on this device. Newest first.</p>
+        <div id="historyList"></div>
+        <div class="controls" style="margin-top: 12px;">
+          <button id="clearHistoryBtn" class="outlined">Clear history</button>
+          <span id="historyStatus" class="status"></span>
+        </div>
+      </details>
 
       <details class="settings-block">
         <summary>Bootstrap peers</summary>
@@ -114,21 +120,6 @@
       </details>
 
       <details class="settings-block">
-        <summary>Etch history</summary>
-        <p class="sub">Local list of etches made on this device. Newest first.</p>
-        <div id="historyList"></div>
-        <div class="controls" style="margin-top: 12px;">
-          <button id="clearHistoryBtn" class="outlined">Clear history</button>
-          <span id="historyStatus" class="status"></span>
-        </div>
-      </details>
-
-      <details class="settings-block">
-        <summary>Terms</summary>
-        <pre id="termsText" class="terms-text"></pre>
-      </details>
-
-      <details class="settings-block">
         <summary>Library key — backup / restore</summary>
         <p class="sub">The 32-byte AES key derived from your wallet. Shared across mobile + desktop + web viewer for the same wallet. Anyone with this key plus your wallet address can read your library.</p>
         <div class="controls" style="margin-top: 6px;">
@@ -137,6 +128,27 @@
           <span id="libraryKeyStatus" class="status"></span>
         </div>
         <div id="libraryKeyOutput" style="margin-top: 10px;"></div>
+      </details>
+
+      <details class="settings-block" id="manualSection">
+        <summary>Decode library with a manually-entered key</summary>
+        <p class="sub">Fallback for when a wallet sign isn't available — paste the wallet address and 64-hex library key directly.</p>
+        <label for="wallet">Wallet address</label>
+        <input id="wallet" type="text" placeholder="0x… (40 hex chars)" autocomplete="off" spellcheck="false" />
+
+        <label for="key">Library key (Settings → Library key → Show library key)</label>
+        <div style="display: flex; gap: 8px;">
+          <input id="key" type="password" placeholder="64 hex chars" autocomplete="new-password" spellcheck="false" style="flex: 1;" />
+          <button id="toggleKey" type="button" class="outlined" style="padding: 0 10px;">Show</button>
+        </div>
+        <div class="controls" style="margin-top: 12px;">
+          <button id="decodeManual">Decode library</button>
+        </div>
+      </details>
+
+      <details class="settings-block">
+        <summary>Terms</summary>
+        <pre id="termsText" class="terms-text"></pre>
       </details>
 
     </main>

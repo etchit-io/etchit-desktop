@@ -1070,6 +1070,144 @@ function newId(): string {
   return bytesToHex(crypto.getRandomValues(new Uint8Array(8)));
 }
 
+// ── Failed-finalize recovery (Phase 3e) ──────────────────────────
+//
+// finalize_*_etch is the chunk-storage step. It can fail with a partial
+// upload (some chunks stored, some not) when network nodes responsible
+// for specific chunk addresses are unreachable.
+//
+// Recovery is *not* via retrying the same upload_id — ant-ffi's
+// finalize_upload calls `take_pending(upload_id)` which removes the
+// prepared state on first attempt, regardless of outcome. The upload_id
+// is gone after that. Mobile has the same constraint.
+//
+// The actual recovery is to re-etch the same byte content. Autonomi is
+// content-addressed; chunks that successfully stored on the previous
+// attempt are recognized at the quote step and skipped, so the wallet
+// only signs payment for the chunks that didn't land.
+//
+// We persist the original content + title + private flag so 'Retry'
+// can re-run the etch flow without the user having to remember /
+// re-paste anything.
+
+type PendingFinalize = {
+  isPrivate: boolean;
+  text: string;
+  title: string;
+};
+
+let pendingFinalize: PendingFinalize | null = null;
+
+function persistPendingFinalize(): void {
+  if (pendingFinalize) {
+    localStorage.setItem("etchit:pending-finalize:v1", JSON.stringify(pendingFinalize));
+  } else {
+    localStorage.removeItem("etchit:pending-finalize:v1");
+  }
+}
+
+function loadPendingFinalize(): void {
+  try {
+    const raw = localStorage.getItem("etchit:pending-finalize:v1");
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Partial<PendingFinalize>;
+    // Be strict: drop entries from previous formats (which had upload_id /
+    // payments / dataMap fields) — they're not retryable under the new
+    // re-etch model.
+    if (typeof parsed.text === "string" && typeof parsed.title === "string" && typeof parsed.isPrivate === "boolean") {
+      pendingFinalize = parsed as PendingFinalize;
+    } else {
+      localStorage.removeItem("etchit:pending-finalize:v1");
+    }
+  } catch { pendingFinalize = null; }
+}
+
+function showFinalizeRetry(message: string): void {
+  if (!pendingFinalize) return;
+  const root = $("etchResult");
+  root.innerHTML = "";
+  const panel = document.createElement("div");
+  panel.className = "etch-result";
+
+  const heading = document.createElement("div");
+  heading.style.color = "var(--copper)";
+  heading.style.fontWeight = "500";
+  heading.textContent = "Etch failed";
+  panel.appendChild(heading);
+
+  const desc = document.createElement("div");
+  desc.className = "fetch-meta";
+  desc.style.color = "var(--ash)";
+  desc.style.marginTop = "4px";
+  desc.style.marginBottom = "10px";
+  desc.textContent = message;
+  panel.appendChild(desc);
+
+  const note = document.createElement("div");
+  note.style.fontSize = "12px";
+  note.style.color = "var(--bone)";
+  note.style.padding = "8px 10px";
+  note.style.borderLeft = "2px solid var(--copper)";
+  note.style.marginBottom = "10px";
+  note.textContent =
+    "Re-etch will sign a fresh payment and try again. Autonomi is content-addressed: " +
+    "any chunks from the previous attempt that did store are recognized at the quote step " +
+    "and skipped, so the wallet payment covers only the chunks that haven't landed.";
+  panel.appendChild(note);
+
+  const actions = document.createElement("div");
+  actions.style.display = "flex";
+  actions.style.gap = "8px";
+
+  const retryBtn = document.createElement("button");
+  retryBtn.className = "outlined";
+  retryBtn.style.borderColor = "var(--copper)";
+  retryBtn.style.color = "var(--copper)";
+  retryBtn.textContent = "Re-etch (dedup-aware)";
+  retryBtn.onclick = () => { void retryFinalize(); };
+  actions.appendChild(retryBtn);
+
+  const dismissBtn = document.createElement("button");
+  dismissBtn.className = "outlined";
+  dismissBtn.textContent = "Dismiss";
+  dismissBtn.onclick = () => {
+    clearEtchAttempt();
+    $("etchResult").innerHTML = "";
+  };
+  actions.appendChild(dismissBtn);
+
+  panel.appendChild(actions);
+  root.appendChild(panel);
+}
+
+async function retryFinalize(): Promise<void> {
+  if (!pendingFinalize) return;
+  const p = pendingFinalize;
+  setEtchStatus("Re-etching with dedup…", "warn");
+  $("etchResult").innerHTML = "";
+  try {
+    if (p.isPrivate) {
+      const r = await etchPrivate(p.text, p.title);
+      setEtchStatus("Done.", "ok");
+      showPrivateEtchResult(r.id, r.chunks, p.title);
+      renderPrivateEtches();
+      const w = knownWallet();
+      if (w) pushHistoryPrivate(w, r.id, p.title);
+    } else {
+      const r = await etchPublic(p.text, p.title);
+      setEtchStatus("Done.", "ok");
+      showEtchResult(r, p.title);
+      const w = knownWallet();
+      if (w) pushHistoryPublic(w, r.address, p.title);
+    }
+    clearEtchAttempt();
+    void refreshAntBalance();
+  } catch (e) {
+    setEtchStatus(`Re-etch failed: ${(e as Error).message ?? String(e)}`, "err");
+    showFinalizeRetry((e as Error).message ?? String(e));
+  }
+}
+
 // ── Etch creation (Phase 3a) ─────────────────────────────────────
 
 type PaymentDto = { quote_hash: string; rewards_address: string; amount: string };
@@ -1167,12 +1305,17 @@ async function etchPublic(text: string, title: string): Promise<PublicEtchResult
   if (payReceipt?.status !== 1) throw new Error(`payForQuotes reverted (${payHash})`);
 
   setEtchStatus("Finalizing upload — pushing chunks to network…", "warn");
+  return await finalizePublic(prepared.upload_id, prepared.payments, payHash, title);
+}
+
+async function finalizePublic(uploadId: string, payments: PaymentDto[], payHash: string, _title: string): Promise<PublicEtchResult> {
   const txHashes: Record<string, string> = {};
-  for (const p of prepared.payments) txHashes[p.quote_hash] = payHash;
-  return await invoke<PublicEtchResult>("finalize_public_etch", {
-    uploadId: prepared.upload_id,
+  for (const p of payments) txHashes[p.quote_hash] = payHash;
+  const result = await invoke<PublicEtchResult>("finalize_public_etch", {
+    uploadId,
     txHashes,
   });
+  return result;
 }
 
 function showEtchResult(result: PublicEtchResult, title: string): void {
@@ -1263,11 +1406,11 @@ async function etchPrivate(text: string, title: string): Promise<{ id: string; c
   const walletProvider = appKit.getWalletProvider() as Eip1193Provider | undefined;
   if (!walletProvider) throw new Error("Wallet provider unavailable.");
 
-  // Storage key is needed to encrypt the data-map at rest. If not yet
-  // derived, prompt for the dedicated private-storage personal_sign —
-  // distinct from the library-derive sign so we don't conflate them.
+  // Storage key is needed to encrypt the data-map at rest. Pre-derive
+  // here so the wallet sign isn't a surprise mid-flow. The actual
+  // encrypt + persist happens inside finalizePrivate after upload.
   setEtchStatus("Sign private-storage message in your wallet (one-time)…", "warn");
-  const { wallet: storageWallet, key: storageKey } = await ensureStorageKey();
+  await ensureStorageKey();
 
   const data = buildEnvelope(text, title);
 
@@ -1302,20 +1445,21 @@ async function etchPrivate(text: string, title: string): Promise<{ id: string; c
   if (r?.status !== 1) throw new Error(`payForQuotes reverted (${payHash})`);
 
   setEtchStatus("Finalizing upload — pushing chunks to network…", "warn");
-  const txHashes: Record<string, string> = {};
-  for (const p of prepared.payments) txHashes[p.quote_hash] = payHash;
-  const result = await invoke<PrivateEtchResult>("finalize_private_etch", {
-    uploadId: prepared.upload_id,
-    txHashes,
-  });
+  return await finalizePrivate(prepared.upload_id, prepared.payments, payHash, title, prepared.data_map, data.length);
+}
 
-  // Persist the data-map locally — encrypted with the wallet-derived
-  // storage key. Without this map, the etch is unrecoverable.
+async function finalizePrivate(uploadId: string, payments: PaymentDto[], payHash: string, title: string, dataMap: string, size: number): Promise<{ id: string; chunks: number }> {
+  const txHashes: Record<string, string> = {};
+  for (const p of payments) txHashes[p.quote_hash] = payHash;
+  const result = await invoke<PrivateEtchResult>("finalize_private_etch", { uploadId, txHashes });
+
+  // Finalize succeeded — persist the data-map locally.
   setEtchStatus("Saving data-map locally…", "warn");
+  const { wallet: storageWallet, key: storageKey } = await ensureStorageKey();
   const id = newId();
-  const cipher = await encryptDataMap(storageKey, prepared.data_map);
+  const cipher = await encryptDataMap(storageKey, dataMap);
   const entries = loadPrivateEntries(storageWallet);
-  entries.push({ id, title: title || "", ts: Math.floor(Date.now() / 1000), size: data.length, cipher });
+  entries.push({ id, title: title || "", ts: Math.floor(Date.now() / 1000), size, cipher });
   savePrivateEntries(storageWallet, entries);
 
   return { id, chunks: result.chunks_stored };
@@ -1341,6 +1485,7 @@ $("etchBtn").addEventListener("click", async () => {
   btn.disabled = true;
   $("etchResult").innerHTML = "";
   try {
+    markEtchAttempt(text, title, isPrivate);
     if (isPrivate) {
       const r = await etchPrivate(text, title);
       setEtchStatus("Done.", "ok");
@@ -1355,13 +1500,47 @@ $("etchBtn").addEventListener("click", async () => {
       const w = knownWallet();
       if (w) pushHistoryPublic(w, r.address, title);
     }
+    clearEtchAttempt();
     void refreshAntBalance();
   } catch (e) {
-    setEtchStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
+    const msg = (e as Error).message ?? String(e);
+    setEtchStatus(`Failed: ${msg}`, "err");
+    if (pendingFinalize) showFinalizeRetry(msg);
   } finally {
     btn.disabled = false;
   }
 });
+
+// Mark the etch as "in flight" before we start so any failure leaves a
+// retry handle. Cleared on full success at the end of each successful
+// etch path.
+function markEtchAttempt(text: string, title: string, isPrivate: boolean): void {
+  pendingFinalize = { text, title, isPrivate };
+  persistPendingFinalize();
+}
+function clearEtchAttempt(): void {
+  pendingFinalize = null;
+  persistPendingFinalize();
+}
+
+// Surface a stale pending-finalize on startup (page reload after a
+// finalize failure) so the user has the Retry button available.
+loadPendingFinalize();
+if (pendingFinalize) showFinalizeRetry("Previous upload didn't finalize. Retry uses the existing payment.");
+
+// Terms gate — first-launch modal. Mirrors mobile's Terms.ACCEPTED_KEY
+// flag in SharedPreferences. Persists to localStorage; shown once.
+const TERMS_ACCEPTED_KEY = "etchit:terms-accepted:v1";
+function showTermsGateIfNeeded(): void {
+  if (localStorage.getItem(TERMS_ACCEPTED_KEY)) return;
+  $("termsGateText").textContent = TERMS_TEXT;
+  $("termsGate").removeAttribute("hidden");
+}
+$("termsAcceptBtn").addEventListener("click", () => {
+  localStorage.setItem(TERMS_ACCEPTED_KEY, "1");
+  $("termsGate").setAttribute("hidden", "");
+});
+showTermsGateIfNeeded();
 
 // ── Private etches list (Phase 3c) ───────────────────────────────
 
@@ -1703,7 +1882,16 @@ function initSettingsUI(): void {
     el.className = "status" + (cls ? ` ${cls}` : "");
   };
 
-  $("showLibraryKeyBtn").addEventListener("click", async () => {
+  let libraryKeyVisible = false;
+  const showBtn = $<HTMLButtonElement>("showLibraryKeyBtn");
+  const hideKey = (): void => {
+    libKeyOut.innerHTML = "";
+    libraryKeyVisible = false;
+    showBtn.textContent = "Show library key";
+  };
+
+  showBtn.addEventListener("click", async () => {
+    if (libraryKeyVisible) { hideKey(); return; }
     setLibKeyStatus("");
     libKeyOut.innerHTML = "";
     try {
@@ -1741,6 +1929,8 @@ function initSettingsUI(): void {
       block.appendChild(copyBtn);
 
       libKeyOut.appendChild(block);
+      libraryKeyVisible = true;
+      showBtn.textContent = "Hide library key";
     } catch (e) {
       setLibKeyStatus(`failed: ${(e as Error).message ?? String(e)}`, "err");
     }
@@ -1748,7 +1938,7 @@ function initSettingsUI(): void {
 
   $("forgetLibraryBtn").addEventListener("click", () => {
     walletKeys = null;
-    libKeyOut.innerHTML = "";
+    hideKey();
     currentLibraryEntries = [];
     $("results").innerHTML = "";
     setLibKeyStatus("forgotten — keys re-derive on next sign", "ok");

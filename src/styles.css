@@ -227,16 +227,23 @@ code {
 .wallet-bar #walletBtn { padding: 4px 10px; font-size: 11px; }
 
 .wallet-prompt {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 32px);
+  max-width: 720px;
+  z-index: 1000;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  margin: 0 0 18px;
   background: var(--ink-2);
   border: 1px solid var(--copper);
   border-radius: 6px;
   color: var(--bone);
   font-size: 13px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
   animation: pulse 2s infinite;
 }
 
@@ -373,6 +380,11 @@ label.checkbox {
 
 label.checkbox input { margin: 0; }
 
+label.checkbox .checkbox-sub {
+  font-size: 11px;
+  color: var(--ash);
+}
+
 .settings-block {
   background: var(--ink-2);
   border: 1px solid #1f1f1f;
@@ -399,6 +411,47 @@ label.checkbox input { margin: 0; }
   font-size: 12px;
   color: var(--bone);
   line-height: 1.6;
+}
+
+.terms-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.terms-gate[hidden] { display: none; }
+
+.terms-modal {
+  background: var(--ink-2);
+  border: 1px solid var(--copper);
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 720px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
+}
+
+.terms-modal h2 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.terms-modal .terms-text {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 14px 16px;
+  background: var(--ink-3);
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
 }
 
 .info {
