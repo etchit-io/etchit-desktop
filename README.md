@@ -1,4 +1,4 @@
-# etchit
+# etch/it
 
 Permanent, decentralized text storage on the [Autonomi](https://autonomi.com) network. Etch text to the network forever. Fetch anything back.
 
