@@ -29,7 +29,7 @@ You'll also need an Android wallet that speaks WalletConnect v2 (MetaMask, Rainb
 - Raw text displays as-is
 - Other files (video, PDF, etc.) save to Downloads with an option to open
 
-**Library** *(optional, off by default)* — An encrypted on-chain index of your public etches that lets you find them on a different device. Settings → Library → Set up library, sign one message, and you have a wallet-bound encryption key cached on the device. Each entry you add — manually by address, or via the long-press action on a history row — costs one Arbitrum One transaction (~$0.02–$0.10 in ETH gas, no ANT). Restore from chain on a second device with the same wallet to see your entries. Private etches are not synced in v0.1; use the existing Backup & Restore flow to move them between devices. Wire format and full security/privacy disclosure live in [`docs/library-format-v1.md`](docs/library-format-v1.md).
+**Library** *(optional, off by default)* — An encrypted on-chain index of your public etches that lets you find them on a different device. Settings → Library → Set up library, sign one message, and you have a wallet-bound encryption key cached on the device. Each entry you add — manually by address, or via the long-press action on a history row — costs one Arbitrum One transaction. Restore from chain on a second device with the same wallet to see your entries. Private etches are not synced in v0.1; use the existing Backup & Restore flow to move them between devices. Wire format and full security/privacy disclosure live in [`docs/library-format-v1.md`](docs/library-format-v1.md).
 
 ## How it works
 
