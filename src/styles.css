@@ -331,6 +331,23 @@ h2 {
   border-radius: 6px;
 }
 
+.label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.label-row label { margin: 0; }
+
+.attach-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 textarea {
   width: 100%;
   padding: 10px 12px;

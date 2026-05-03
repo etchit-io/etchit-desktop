@@ -45,7 +45,11 @@
         <h2>Create an etch <span class="info" data-tip="Wallet must be connected. Public etches: anyone with the address can fetch. Private etches: data-map stays on this device, encrypted with your wallet key.">i</span></h2>
         <label for="etchTitle">Title (optional)</label>
         <input id="etchTitle" type="text" placeholder="e.g. release notes" autocomplete="off" />
-        <label for="etchText">Content</label>
+        <div class="label-row">
+          <label for="etchText">Content</label>
+          <button id="attachBtn" type="button" class="outlined attach-btn">Attach text file…</button>
+          <input id="attachFileInput" type="file" accept="text/*,.txt,.md,.json,.xml,.yml,.yaml,.toml,.csv,.log,.html,.css,.js,.ts,.py,.rs,.go,.kt,.java,.c,.cpp,.h" hidden />
+        </div>
         <textarea id="etchText" rows="6" placeholder="Paste text here. Multi-line is fine."></textarea>
         <label class="checkbox">
           <input id="etchPrivate" type="checkbox" />
@@ -116,6 +120,36 @@
         <div class="controls" style="margin-top: 12px;">
           <button id="saveIndexerBtn">Save</button>
           <span id="indexerStatus" class="status"></span>
+        </div>
+      </details>
+
+      <details class="settings-block">
+        <summary>Back up private etches to the network</summary>
+        <p class="sub">
+          Encrypts your private etch list with a password and etches it as a public blob on Autonomi. Save the resulting address — with the password it's your recovery key on any device. Anyone can fetch the bytes; only your password decrypts them.
+        </p>
+        <label for="backupPassword">Password</label>
+        <input id="backupPassword" type="password" autocomplete="new-password" placeholder="At least 8 characters" />
+        <div id="backupPwStrength" class="status" style="display: block; margin-top: 4px;"></div>
+        <label for="backupPasswordConfirm" style="margin-top: 12px;">Confirm password</label>
+        <input id="backupPasswordConfirm" type="password" autocomplete="new-password" />
+        <div class="controls" style="margin-top: 12px;">
+          <button id="createBackupBtn">Create encrypted backup &amp; etch</button>
+          <span id="backupStatus" class="status"></span>
+        </div>
+        <div id="backupResult" style="margin-top: 10px;"></div>
+      </details>
+
+      <details class="settings-block">
+        <summary>Restore private etches from a backup address</summary>
+        <p class="sub">Paste the recovery address from a previous backup and the password it was encrypted with.</p>
+        <label for="restoreAddr">Backup address (64 hex)</label>
+        <input id="restoreAddr" type="text" autocomplete="off" spellcheck="false" placeholder="64 hex characters" />
+        <label for="restorePassword" style="margin-top: 12px;">Password</label>
+        <input id="restorePassword" type="password" autocomplete="off" />
+        <div class="controls" style="margin-top: 12px;">
+          <button id="restoreBackupBtn">Fetch and restore</button>
+          <span id="restoreStatus" class="status"></span>
         </div>
       </details>
 

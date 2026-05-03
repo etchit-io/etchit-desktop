@@ -938,8 +938,7 @@ async function fetchInto(row: HTMLDivElement, addr: string, fallbackTitle: strin
       break;
     }
     case "backup": {
-      appendError(out, "Encrypted backup file — password decrypt not yet implemented in desktop.");
-      addSaveButton(out, bytes, fallbackTitle, "etchit-backup");
+      renderBackupDecryptForm(out, bytes);
       break;
     }
     case "binary": {
@@ -952,6 +951,57 @@ async function fetchInto(row: HTMLDivElement, addr: string, fallbackTitle: strin
       break;
     }
   }
+}
+
+function renderBackupDecryptForm(parent: HTMLElement, bytes: Uint8Array): void {
+  const note = document.createElement("div");
+  note.className = "fetch-meta";
+  note.style.color = "var(--ash)";
+  note.style.marginBottom = "8px";
+  note.textContent = "Encrypted etchit backup. Enter the password to decrypt and import the private etches into this device.";
+  parent.appendChild(note);
+
+  const pwInput = document.createElement("input");
+  pwInput.type = "password";
+  pwInput.placeholder = "Backup password";
+  pwInput.autocomplete = "off";
+  pwInput.style.width = "100%";
+  pwInput.style.marginBottom = "8px";
+  parent.appendChild(pwInput);
+
+  const status = document.createElement("div");
+  status.className = "status";
+  status.style.marginBottom = "8px";
+  parent.appendChild(status);
+
+  const setLocalStatus = (msg: string, cls: "ok" | "err" | "warn" | "" = "") => {
+    status.textContent = msg;
+    status.className = "status" + (cls ? ` ${cls}` : "");
+  };
+
+  const decryptBtn = document.createElement("button");
+  decryptBtn.className = "outlined";
+  decryptBtn.textContent = "Decrypt and import";
+  decryptBtn.onclick = async () => {
+    if (!pwInput.value) { setLocalStatus("Password is required.", "err"); return; }
+    decryptBtn.disabled = true;
+    try {
+      setLocalStatus("Decrypting…", "warn");
+      const plaintext = await backupDecrypt(bytes, pwInput.value);
+      if (!plaintext) { setLocalStatus("Decrypt failed — wrong password or corrupted backup.", "err"); decryptBtn.disabled = false; return; }
+      setLocalStatus("Importing…", "warn");
+      const { imported, skipped } = await importBackupPlaintext(plaintext);
+      setLocalStatus(`Restored ${imported} new entr${imported === 1 ? "y" : "ies"}${skipped ? ` (skipped ${skipped} duplicate${skipped === 1 ? "" : "s"})` : ""}.`, "ok");
+      pwInput.value = "";
+    } catch (e) {
+      setLocalStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
+      decryptBtn.disabled = false;
+    }
+  };
+  parent.appendChild(decryptBtn);
+
+  // Also offer raw save in case the user wants to keep the bytes.
+  addSaveButton(parent, bytes, "etchit-backup", "etchit-backup");
 }
 
 function renderText(parent: HTMLElement, title: string, content: string): void {
@@ -1068,6 +1118,144 @@ function newId(): string {
   // Random 8-byte hex id for local-only references; collision-tolerant
   // since it's a per-wallet local index.
   return bytesToHex(crypto.getRandomValues(new Uint8Array(8)));
+}
+
+// ── Backup to network (Phase 3f) ─────────────────────────────────
+//
+// Password-encrypted backup of private etch data-maps, etched publicly
+// on Autonomi. Anyone with the resulting address can fetch the bytes;
+// only the password decrypts. Same wire format as BackupCrypto.kt so a
+// backup created on either client round-trips through the other.
+//
+// Format:
+//   ETCHIT_BACKUP_v1\n   (17 bytes magic)
+//   salt                  (16 bytes)
+//   iv                    (12 bytes)
+//   ciphertext + tag      (remaining)
+// Key derivation: PBKDF2-HMAC-SHA256, 600_000 iterations, 256-bit AES-GCM.
+
+const BACKUP_MAGIC_STR = "ETCHIT_BACKUP_v1\n";
+const BACKUP_SALT_LEN = 16;
+const BACKUP_IV_LEN = 12;
+const BACKUP_PBKDF2_ITERATIONS = 600_000;
+const MIN_BACKUP_PASSWORD_LEN = 8;
+
+async function deriveBackupKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+  const pwKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveKey"],
+  );
+  return await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: BACKUP_PBKDF2_ITERATIONS, hash: "SHA-256" },
+    pwKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+async function backupEncrypt(plaintext: Uint8Array, password: string): Promise<Uint8Array> {
+  const magic = new TextEncoder().encode(BACKUP_MAGIC_STR);
+  const salt = crypto.getRandomValues(new Uint8Array(BACKUP_SALT_LEN));
+  const iv = crypto.getRandomValues(new Uint8Array(BACKUP_IV_LEN));
+  const key = await deriveBackupKey(password, salt);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext));
+  const out = new Uint8Array(magic.length + salt.length + iv.length + ct.length);
+  out.set(magic, 0);
+  out.set(salt, magic.length);
+  out.set(iv, magic.length + salt.length);
+  out.set(ct, magic.length + salt.length + iv.length);
+  return out;
+}
+
+async function backupDecrypt(data: Uint8Array, password: string): Promise<Uint8Array | null> {
+  const magic = new TextEncoder().encode(BACKUP_MAGIC_STR);
+  if (data.length < magic.length + BACKUP_SALT_LEN + BACKUP_IV_LEN + 1) return null;
+  for (let i = 0; i < magic.length; i++) if (data[i] !== magic[i]) return null;
+  let off = magic.length;
+  const salt = data.slice(off, off + BACKUP_SALT_LEN); off += BACKUP_SALT_LEN;
+  const iv = data.slice(off, off + BACKUP_IV_LEN); off += BACKUP_IV_LEN;
+  const ct = data.slice(off);
+  try {
+    const key = await deriveBackupKey(password, salt);
+    return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct));
+  } catch {
+    return null; // wrong password or tampered ciphertext
+  }
+}
+
+function passwordStrength(pw: string): { label: string; cls: "ok" | "err" | "warn" | "" } {
+  if (!pw) return { label: "", cls: "" };
+  const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter((re) => re.test(pw)).length;
+  if (pw.length < MIN_BACKUP_PASSWORD_LEN) return { label: `Weak — use at least ${MIN_BACKUP_PASSWORD_LEN} characters`, cls: "err" };
+  if (pw.length >= 12 || classes >= 3) return { label: "Strong", cls: "ok" };
+  return { label: "OK — stronger with mixed character types", cls: "warn" };
+}
+
+// Builds the plaintext format mobile expects: JSON array of
+// {dm: <hex datamap>, t: <title>, ts: <timestamp ms>}. Mirrors
+// PrivateDataStore.exportAll on Android.
+async function buildBackupPlaintext(): Promise<{ plaintext: Uint8Array; entries: number }> {
+  const { wallet, key: storageKey } = await ensureStorageKey();
+  const stored = loadPrivateEntries(wallet);
+  const exported: Array<{ dm: string; t: string; ts: number }> = [];
+  for (const e of stored) {
+    try {
+      const dm = await decryptDataMap(storageKey, e.cipher);
+      exported.push({ dm, t: e.title, ts: e.ts * 1000 }); // ms for mobile compat
+    } catch { /* skip undecryptable entries — wrong storage key */ }
+  }
+  return {
+    plaintext: new TextEncoder().encode(JSON.stringify(exported)),
+    entries: exported.length,
+  };
+}
+
+// Imports entries from a decrypted backup plaintext into the local
+// PrivateStore. Skips data-maps that already exist locally.
+async function importBackupPlaintext(plaintext: Uint8Array): Promise<{ imported: number; skipped: number }> {
+  let parsed: Array<{ dm?: unknown; t?: unknown; ts?: unknown }>;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(plaintext)) as Array<{ dm?: unknown; t?: unknown; ts?: unknown }>;
+  } catch {
+    throw new Error("Backup plaintext is not valid JSON.");
+  }
+  if (!Array.isArray(parsed)) throw new Error("Backup must be a JSON array.");
+
+  const { wallet, key: storageKey } = await ensureStorageKey();
+  const existing = loadPrivateEntries(wallet);
+  const existingDms = new Set<string>();
+  for (const e of existing) {
+    try {
+      const dm = await decryptDataMap(storageKey, e.cipher);
+      existingDms.add(dm.toLowerCase());
+    } catch { /* skip undecryptable */ }
+  }
+
+  let imported = 0, skipped = 0;
+  for (const obj of parsed) {
+    const dm = typeof obj.dm === "string" ? obj.dm : "";
+    if (!dm) { skipped++; continue; }
+    if (existingDms.has(dm.toLowerCase())) { skipped++; continue; }
+    const title = typeof obj.t === "string" ? obj.t : "";
+    const tsMs = typeof obj.ts === "number" ? obj.ts : Date.now();
+    const cipher = await encryptDataMap(storageKey, dm);
+    existing.push({
+      id: newId(),
+      title,
+      ts: Math.floor(tsMs / 1000),
+      size: 0,
+      cipher,
+    });
+    existingDms.add(dm.toLowerCase());
+    imported++;
+  }
+  savePrivateEntries(wallet, existing);
+  renderPrivateEtches();
+  return { imported, skipped };
 }
 
 // ── Failed-finalize recovery (Phase 3e) ──────────────────────────
@@ -1260,6 +1448,12 @@ async function sendTx(walletProvider: Eip1193Provider, from: string, to: string,
 }
 
 async function etchPublic(text: string, title: string): Promise<PublicEtchResult> {
+  return await uploadPublicBytes(buildEnvelope(text, title), title);
+}
+
+// Shared raw-bytes upload path — used by etchPublic (envelope-wrapped
+// text) and the backup flow (already-encrypted binary blob).
+async function uploadPublicBytes(data: Uint8Array, title: string): Promise<PublicEtchResult> {
   if (!inTauri) throw new Error("Etching requires the desktop app (no FFI in plain browser).");
 
   const account = appKit.getAccount() as AppKitAccount | undefined;
@@ -1268,8 +1462,6 @@ async function etchPublic(text: string, title: string): Promise<PublicEtchResult
 
   const walletProvider = appKit.getWalletProvider() as Eip1193Provider | undefined;
   if (!walletProvider) throw new Error("Wallet provider unavailable.");
-
-  const data = buildEnvelope(text, title);
 
   setEtchStatus("Collecting quotes from network…", "warn");
   const prepared = await invoke<PreparedPublicEtch>("prepare_public_etch", { data: Array.from(data) });
@@ -1475,6 +1667,35 @@ async function fetchPrivateEntry(id: string): Promise<{ data: Uint8Array; title:
   return { data: Uint8Array.from(arr), title: entry.title };
 }
 
+// Paperclip — attach a text file. Mirrors mobile's TEXT_MIME_TYPES /
+// MAX_ATTACHMENT_BYTES limits and behavior: validates UTF-8, loads
+// content into the textarea, auto-fills title from filename if empty.
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+$("attachBtn").addEventListener("click", () => $<HTMLInputElement>("attachFileInput").click());
+$("attachFileInput").addEventListener("change", async (ev) => {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    setEtchStatus("File too large — max 20 MB", "err");
+    return;
+  }
+  let text: string;
+  try {
+    const buf = await file.arrayBuffer();
+    text = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    setEtchStatus("File is not valid UTF-8 text", "err");
+    return;
+  }
+  $<HTMLTextAreaElement>("etchText").value = text;
+  const titleInput = $<HTMLInputElement>("etchTitle");
+  if (!titleInput.value.trim() && file.name) titleInput.value = file.name;
+  setEtchStatus(`Loaded ${file.name}`, "ok");
+});
+
 $("etchBtn").addEventListener("click", async () => {
   const text = $<HTMLTextAreaElement>("etchText").value;
   const title = $<HTMLInputElement>("etchTitle").value.trim();
@@ -1543,6 +1764,39 @@ $("termsAcceptBtn").addEventListener("click", () => {
 showTermsGateIfNeeded();
 
 // ── Private etches list (Phase 3c) ───────────────────────────────
+
+function showBackupResultPanel(address: string, entries: number): void {
+  const root = $("backupResult");
+  root.innerHTML = "";
+  const panel = document.createElement("div");
+  panel.className = "etch-result";
+
+  const heading = document.createElement("div");
+  heading.style.color = "var(--green)";
+  heading.style.fontWeight = "500";
+  heading.textContent = `Backup etched · ${entries} entr${entries === 1 ? "y" : "ies"} encrypted`;
+  panel.appendChild(heading);
+
+  const note = document.createElement("div");
+  note.className = "fetch-meta";
+  note.style.color = "var(--ash)";
+  note.style.marginTop = "4px";
+  note.textContent = "Save this address — with your password it's your recovery key on any device.";
+  panel.appendChild(note);
+
+  const addr = document.createElement("div");
+  addr.className = "etch-result-addr";
+  addr.textContent = address;
+  panel.appendChild(addr);
+
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "outlined";
+  copyBtn.textContent = "Copy address";
+  copyBtn.onclick = () => navigator.clipboard.writeText(address);
+  panel.appendChild(copyBtn);
+
+  root.appendChild(panel);
+}
 
 function showPrivateEtchResult(id: string, chunks: number, title: string): void {
   const root = $("etchResult");
@@ -1942,6 +2196,104 @@ function initSettingsUI(): void {
     currentLibraryEntries = [];
     $("results").innerHTML = "";
     setLibKeyStatus("forgotten — keys re-derive on next sign", "ok");
+  });
+
+  // Backup private etches
+  const pwInput = $<HTMLInputElement>("backupPassword");
+  const pwConfirmInput = $<HTMLInputElement>("backupPasswordConfirm");
+  const pwStrengthEl = $("backupPwStrength");
+  const setBackupStatus = (msg: string, cls: "ok" | "err" | "warn" | "" = "") => {
+    const el = $("backupStatus");
+    el.textContent = msg;
+    el.className = "status" + (cls ? ` ${cls}` : "");
+  };
+
+  pwInput.addEventListener("input", () => {
+    const s = passwordStrength(pwInput.value);
+    pwStrengthEl.textContent = s.label;
+    pwStrengthEl.className = "status" + (s.cls ? ` ${s.cls}` : "");
+  });
+
+  $("createBackupBtn").addEventListener("click", async () => {
+    const pw = pwInput.value;
+    const pwConfirm = pwConfirmInput.value;
+    if (pw.length < MIN_BACKUP_PASSWORD_LEN) {
+      setBackupStatus(`Password too short (min ${MIN_BACKUP_PASSWORD_LEN}).`, "err");
+      return;
+    }
+    if (pw !== pwConfirm) {
+      setBackupStatus("Passwords don't match.", "err");
+      return;
+    }
+    const btn = $<HTMLButtonElement>("createBackupBtn");
+    btn.disabled = true;
+    $("backupResult").innerHTML = "";
+    try {
+      setBackupStatus("Building plaintext…", "warn");
+      const { plaintext, entries } = await buildBackupPlaintext();
+      if (entries === 0) {
+        setBackupStatus("No private etches to back up.", "err");
+        return;
+      }
+      setBackupStatus(`Encrypting ${entries} entr${entries === 1 ? "y" : "ies"}…`, "warn");
+      const encrypted = await backupEncrypt(plaintext, pw);
+      setBackupStatus(`Etching ${formatSize(encrypted.length)} backup…`, "warn");
+      const result = await uploadPublicBytes(encrypted, "Backup");
+      setBackupStatus("Done.", "ok");
+      showBackupResultPanel(result.address, entries);
+      pwInput.value = "";
+      pwConfirmInput.value = "";
+      pwStrengthEl.textContent = "";
+      pwStrengthEl.className = "status";
+      const w = knownWallet();
+      if (w) pushHistoryPublic(w, result.address, "Backup");
+      void refreshAntBalance();
+    } catch (e) {
+      setBackupStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // Restore private etches from a backup address
+  const setRestoreStatus = (msg: string, cls: "ok" | "err" | "warn" | "" = "") => {
+    const el = $("restoreStatus");
+    el.textContent = msg;
+    el.className = "status" + (cls ? ` ${cls}` : "");
+  };
+  $("restoreBackupBtn").addEventListener("click", async () => {
+    const addrRaw = $<HTMLInputElement>("restoreAddr").value.trim().toLowerCase().replace(/^0x/, "");
+    const pw = $<HTMLInputElement>("restorePassword").value;
+    if (!/^[0-9a-f]{64}$/.test(addrRaw)) { setRestoreStatus("Invalid address (need 64 hex chars).", "err"); return; }
+    if (!pw) { setRestoreStatus("Password is required.", "err"); return; }
+    if (!inTauri) { setRestoreStatus("Restore requires the desktop app (no FFI in plain browser).", "err"); return; }
+
+    const btn = $<HTMLButtonElement>("restoreBackupBtn");
+    btn.disabled = true;
+    try {
+      setRestoreStatus("Fetching backup from network…", "warn");
+      const arr = await invoke<number[]>("fetch_public", { addrHex: addrRaw });
+      const bytes = Uint8Array.from(arr);
+      const detected = detectContent(bytes);
+      if (detected.type !== "backup") {
+        setRestoreStatus("That address is not an encrypted etchit backup.", "err");
+        return;
+      }
+      setRestoreStatus("Decrypting…", "warn");
+      const plaintext = await backupDecrypt(bytes, pw);
+      if (!plaintext) {
+        setRestoreStatus("Decrypt failed — wrong password or corrupted backup.", "err");
+        return;
+      }
+      setRestoreStatus("Importing into local private store…", "warn");
+      const { imported, skipped } = await importBackupPlaintext(plaintext);
+      setRestoreStatus(`Restored ${imported} new entr${imported === 1 ? "y" : "ies"}${skipped ? ` (skipped ${skipped} duplicate${skipped === 1 ? "" : "s"})` : ""}.`, "ok");
+      $<HTMLInputElement>("restorePassword").value = "";
+    } catch (e) {
+      setRestoreStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   // Etch history
