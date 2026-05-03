@@ -442,6 +442,7 @@ async function addToLibrary(addr: string, title: string, action: LibraryAction =
 
   const recipient = await recipientForBlob(blob);
   const calldata = "0x" + bytesToHex(blob);
+  await ensureArbitrumChain(walletProvider);
   return await withWalletPrompt("sign the library update in your wallet", async () =>
     (await walletProvider.request({
       method: "eth_sendTransaction",
@@ -657,18 +658,44 @@ $("toggleKey").addEventListener("click", () => {
 $("connect").addEventListener("click", async () => {
   setStatus("connectStatus", "");
   setStatus("status", "");
+  // Require wallet to be connected first via the wallet bar — keeps
+  // wallet-connect and library-derive as two distinct user actions
+  // instead of bundling them into one prompt sequence.
+  if (!knownWallet()) {
+    setStatus("connectStatus", "Connect a wallet first.", "err");
+    return;
+  }
   const btn = $<HTMLButtonElement>("connect");
   btn.disabled = true;
   try {
-    setStatus("connectStatus", "Requesting wallet connection…");
-    const { wallet, key } = await connectAndDeriveKey();
+    setStatus("connectStatus", "Requesting library-derive signature…");
+    const { wallet, key } = await ensureLibraryKey();
     setStatus("connectStatus", `Connected ${wallet.slice(0, 6)}…${wallet.slice(-4)}`, "ok");
     await runDecode(wallet, key);
   } catch (e) {
-    setStatus("connectStatus", `Failed: ${(e as Error).message}`, "err");
+    const msg = (e as Error)?.message || String(e) || "(no error message)";
+    console.error("Open library failed:", e);
+    setStatus("connectStatus", `Failed: ${msg}`, "err");
   } finally {
     btn.disabled = false;
   }
+});
+
+// Clear all transient UI state — typed text, status messages, error
+// banners, in-line fetch result panels. Doesn't touch wallet, library,
+// private etches, history, or in-flight etches.
+$("resetView").addEventListener("click", () => {
+  $<HTMLInputElement>("etchTitle").value = "";
+  $<HTMLTextAreaElement>("etchText").value = "";
+  $<HTMLInputElement>("etchPrivate").checked = false;
+  setEtchStatus("");
+  $("etchResult").innerHTML = "";
+
+  setStatus("connectStatus", "");
+  setStatus("status", "");
+  setStatus("addByAddrStatus", "");
+
+  document.querySelectorAll(".fetch-result").forEach((el) => el.remove());
 });
 
 $("decodeManual").addEventListener("click", async () => {
@@ -893,7 +920,7 @@ async function fetchInto(row: HTMLDivElement, addr: string, fallbackTitle: strin
   if (existing) existing.remove();
 
   const out = document.createElement("div");
-  out.className = "fetch-result";
+  out.className = "fetch-result loading";
   out.textContent = "Fetching from network…";
   row.appendChild(out);
 
@@ -905,12 +932,16 @@ async function fetchInto(row: HTMLDivElement, addr: string, fallbackTitle: strin
     bytes = Uint8Array.from(arr);
   } catch (e) {
     out.textContent = "";
+    out.classList.remove("loading");
     appendError(out, `Fetch failed: ${(e as Error).message ?? String(e)}`);
+    addCloseButton(out);
     return;
   }
 
   const detected = detectContent(bytes);
   out.innerHTML = "";
+  out.classList.remove("loading");
+  addCloseButton(out);
   const meta = document.createElement("div");
   meta.className = "fetch-meta";
   meta.textContent = `${detected.type} · ${formatSize(bytes.length)}`;
@@ -1438,7 +1469,46 @@ async function withWalletPrompt<T>(label: string, fn: () => Promise<T>): Promise
   }
 }
 
+// Some wallets (notably MetaMask Mobile) hold their own selected
+// network independent of which chain the dapp wants to use. Without
+// switching, eth_sendTransaction broadcasts on whatever chain the
+// wallet's currently on — usually Ethereum mainnet — and shows
+// "insufficient funds" even though the user has plenty of ETH on
+// Arbitrum. Mirror EtchSigner.switchChain on Android.
+async function ensureArbitrumChain(walletProvider: Eip1193Provider): Promise<void> {
+  const target = "0x" + ARBITRUM_CHAIN_ID.toString(16);
+  try {
+    const current = (await walletProvider.request({ method: "eth_chainId" })) as string;
+    if (current && current.toLowerCase() === target.toLowerCase()) return;
+  } catch { /* fall through to switch */ }
+  try {
+    await walletProvider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: target }],
+    });
+  } catch (e) {
+    // 4902 = chain not added to wallet. Most wallets bundle Arbitrum
+    // by default so this is rare, but be defensive.
+    const code = (e as { code?: number })?.code;
+    if (code === 4902) {
+      await walletProvider.request({
+        method: "wallet_addEthereumChain",
+        params: [{
+          chainId: target,
+          chainName: "Arbitrum One",
+          nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+          rpcUrls: [ARBITRUM_RPC],
+          blockExplorerUrls: ["https://arbiscan.io"],
+        }],
+      });
+    } else {
+      throw e;
+    }
+  }
+}
+
 async function sendTx(walletProvider: Eip1193Provider, from: string, to: string, data: string, label: string): Promise<string> {
+  await ensureArbitrumChain(walletProvider);
   return await withWalletPrompt(label, async () =>
     (await walletProvider.request({
       method: "eth_sendTransaction",
@@ -1463,10 +1533,12 @@ async function uploadPublicBytes(data: Uint8Array, title: string): Promise<Publi
   const walletProvider = appKit.getWalletProvider() as Eip1193Provider | undefined;
   if (!walletProvider) throw new Error("Wallet provider unavailable.");
 
+  checkCancelled();
   setEtchStatus("Collecting quotes from network…", "warn");
   const prepared = await invoke<PreparedPublicEtch>("prepare_public_etch", { data: Array.from(data) });
   const totalAtto = BigInt(prepared.total_amount);
 
+  checkCancelled();
   setEtchStatus("Checking ANT allowance…", "warn");
   const allowanceCalldata = erc20Iface.encodeFunctionData("allowance", [userAddress, VAULT_ADDRESS]);
   const allowanceHex = await ethCall(ANT_TOKEN_ADDRESS, allowanceCalldata);
@@ -1474,6 +1546,7 @@ async function uploadPublicBytes(data: Uint8Array, title: string): Promise<Publi
   const needsApproval = allowance < totalAtto;
 
   if (needsApproval) {
+    checkCancelled();
     setEtchStatus("Approve ANT in your wallet…", "warn");
     const approveAmount = SESSION_BUDGET_ATTO > totalAtto ? SESSION_BUDGET_ATTO : totalAtto;
     const approveCalldata = erc20Iface.encodeFunctionData("approve", [VAULT_ADDRESS, approveAmount]);
@@ -1483,6 +1556,7 @@ async function uploadPublicBytes(data: Uint8Array, title: string): Promise<Publi
     if (approveReceipt?.status !== 1) throw new Error(`ANT approve reverted (${approveHash})`);
   }
 
+  checkCancelled();
   setEtchStatus("Sign payment in your wallet…", "warn");
   const ensureHex = (s: string) => (s.startsWith("0x") || s.startsWith("0X") ? s : "0x" + s);
   const vaultPayments = prepared.payments.map((p) => [
@@ -1492,6 +1566,9 @@ async function uploadPublicBytes(data: Uint8Array, title: string): Promise<Publi
   ]);
   const payCalldata = vaultIface.encodeFunctionData("payForQuotes", [vaultPayments]);
   const payHash = await sendTx(walletProvider, userAddress, VAULT_ADDRESS, payCalldata, "sign the etch payment in your wallet");
+  // Past-the-point-of-no-return: payment is broadcast, can't unpay.
+  if (etchCancel) etchCancel.afterPay = true;
+  setCancelVisible(false);
   setEtchStatus(`Waiting for payment confirmation (${payHash.slice(0, 10)}…)`, "warn");
   const payReceipt = await rpc.waitForTransaction(payHash);
   if (payReceipt?.status !== 1) throw new Error(`payForQuotes reverted (${payHash})`);
@@ -1601,19 +1678,23 @@ async function etchPrivate(text: string, title: string): Promise<{ id: string; c
   // Storage key is needed to encrypt the data-map at rest. Pre-derive
   // here so the wallet sign isn't a surprise mid-flow. The actual
   // encrypt + persist happens inside finalizePrivate after upload.
+  checkCancelled();
   setEtchStatus("Sign private-storage message in your wallet (one-time)…", "warn");
   await ensureStorageKey();
 
   const data = buildEnvelope(text, title);
 
+  checkCancelled();
   setEtchStatus("Collecting quotes from network…", "warn");
   const prepared = await invoke<PreparedPrivateEtch>("prepare_private_etch", { data: Array.from(data) });
   const totalAtto = BigInt(prepared.total_amount);
 
+  checkCancelled();
   setEtchStatus("Checking ANT allowance…", "warn");
   const allowanceCalldata = erc20Iface.encodeFunctionData("allowance", [userAddress, VAULT_ADDRESS]);
   const allowance = BigInt(await ethCall(ANT_TOKEN_ADDRESS, allowanceCalldata));
   if (allowance < totalAtto) {
+    checkCancelled();
     setEtchStatus("Approve ANT in your wallet…", "warn");
     const approveAmount = SESSION_BUDGET_ATTO > totalAtto ? SESSION_BUDGET_ATTO : totalAtto;
     const approveCalldata = erc20Iface.encodeFunctionData("approve", [VAULT_ADDRESS, approveAmount]);
@@ -1623,6 +1704,7 @@ async function etchPrivate(text: string, title: string): Promise<{ id: string; c
     if (r?.status !== 1) throw new Error(`ANT approve reverted (${approveHash})`);
   }
 
+  checkCancelled();
   setEtchStatus("Sign payment in your wallet…", "warn");
   const ensureHex = (s: string) => (s.startsWith("0x") || s.startsWith("0X") ? s : "0x" + s);
   const vaultPayments = prepared.payments.map((p) => [
@@ -1632,6 +1714,9 @@ async function etchPrivate(text: string, title: string): Promise<{ id: string; c
   ]);
   const payCalldata = vaultIface.encodeFunctionData("payForQuotes", [vaultPayments]);
   const payHash = await sendTx(walletProvider, userAddress, VAULT_ADDRESS, payCalldata, "sign the etch payment in your wallet");
+  // Past-the-point-of-no-return: payment is broadcast, can't unpay.
+  if (etchCancel) etchCancel.afterPay = true;
+  setCancelVisible(false);
   setEtchStatus(`Waiting for payment confirmation (${payHash.slice(0, 10)}…)`, "warn");
   const r = await rpc.waitForTransaction(payHash);
   if (r?.status !== 1) throw new Error(`payForQuotes reverted (${payHash})`);
@@ -1702,8 +1787,9 @@ $("etchBtn").addEventListener("click", async () => {
   const isPrivate = $<HTMLInputElement>("etchPrivate").checked;
   if (!text.trim()) { setEtchStatus("Content is empty.", "err"); return; }
 
-  const btn = $<HTMLButtonElement>("etchBtn");
-  btn.disabled = true;
+  setEtchPanelEnabled(false);
+  etchCancel = { cancelled: false, afterPay: false };
+  setCancelVisible(true);
   $("etchResult").innerHTML = "";
   try {
     markEtchAttempt(text, title, isPrivate);
@@ -1724,11 +1810,18 @@ $("etchBtn").addEventListener("click", async () => {
     clearEtchAttempt();
     void refreshAntBalance();
   } catch (e) {
-    const msg = (e as Error).message ?? String(e);
-    setEtchStatus(`Failed: ${msg}`, "err");
-    if (pendingFinalize) showFinalizeRetry(msg);
+    if (e instanceof EtchCancelled) {
+      setEtchStatus("Cancelled.", "warn");
+      clearEtchAttempt();
+    } else {
+      const msg = (e as Error).message ?? String(e);
+      setEtchStatus(`Failed: ${msg}`, "err");
+      if (pendingFinalize) showFinalizeRetry(msg);
+    }
   } finally {
-    btn.disabled = false;
+    setEtchPanelEnabled(true);
+    setCancelVisible(false);
+    etchCancel = null;
   }
 });
 
@@ -1744,10 +1837,67 @@ function clearEtchAttempt(): void {
   persistPendingFinalize();
 }
 
+// User-cancellation token for in-flight etches. Checked at each async
+// boundary in etchPublic / etchPrivate. Cancellation only meaningfully
+// works BEFORE the payForQuotes broadcast — once payment is on-chain
+// you can't unpay. The Cancel button hides itself after that point.
+class EtchCancelled extends Error {
+  constructor() { super("cancelled by user"); this.name = "EtchCancelled"; }
+}
+let etchCancel: { cancelled: boolean; afterPay: boolean } | null = null;
+function checkCancelled(): void {
+  if (etchCancel?.cancelled) throw new EtchCancelled();
+}
+
+function setEtchPanelEnabled(enabled: boolean): void {
+  $<HTMLInputElement>("etchTitle").disabled = !enabled;
+  $<HTMLTextAreaElement>("etchText").disabled = !enabled;
+  $<HTMLInputElement>("etchPrivate").disabled = !enabled;
+  $<HTMLButtonElement>("attachBtn").disabled = !enabled;
+  $<HTMLButtonElement>("etchBtn").disabled = !enabled;
+}
+
+function setCancelVisible(visible: boolean): void {
+  const btn = $<HTMLButtonElement>("etchCancelBtn");
+  if (visible) btn.removeAttribute("hidden");
+  else btn.setAttribute("hidden", "");
+  btn.disabled = false;
+}
+
+$("etchCancelBtn").addEventListener("click", () => {
+  if (!etchCancel || etchCancel.afterPay) return;
+  etchCancel.cancelled = true;
+  $<HTMLButtonElement>("etchCancelBtn").disabled = true;
+  setEtchStatus("Cancelling…", "warn");
+});
+
 // Surface a stale pending-finalize on startup (page reload after a
 // finalize failure) so the user has the Retry button available.
 loadPendingFinalize();
 if (pendingFinalize) showFinalizeRetry("Previous upload didn't finalize. Retry uses the existing payment.");
+
+// Mirrors Terms.kt on Android. Same wording across clients. Declared
+// here (not in initSettingsUI) so the first-launch terms gate below
+// can read it without a temporal-dead-zone reference.
+const TERMS_TEXT = `By using etchit you agree:
+
+1. You own what you etch. Don't upload material that infringes copyright, violates the law, or that you don't have the right to share.
+
+2. No illegal content. No CSAM, no malware, no content that harms others.
+
+3. Etches are permanent. Once written to the Autonomi network, content cannot be deleted — by you, by us, or by anyone.
+
+4. Your data map is the only key to a private etch. Treat it like a password — keep it secure, don't expose it. Loss or compromise means loss of privacy, and we cannot revoke access.
+
+5. Your wallet, your keys, your costs. etchit never holds your private keys. You sign every transaction yourself, and you pay the gas and ANT cost.
+
+6. No warranty. etchit is provided as-is. The Autonomi network and Arbitrum RPC are operated by third parties; we don't guarantee uptime, data availability, or recoverability.
+
+7. No data recovery. If you lose a private data map, the content is gone. We cannot recover it.
+
+8. You are responsible for what you post. etchit is a client app, not a host. We do not monitor, scan, or moderate content. Misuse is your liability.
+
+9. No refunds for failed uploads. Network errors, app crashes, transaction failures, or any other technical issue during an etch may result in spent ANT or gas with no content stored. Blockchain transactions cannot be reversed and we cannot refund.`;
 
 // Terms gate — first-launch modal. Mirrors mobile's Terms.ACCEPTED_KEY
 // flag in SharedPreferences. Persists to localStorage; shown once.
@@ -1883,14 +2033,18 @@ function renderPrivateEtches(): void {
     fetchBtn.onclick = async () => {
       fetchBtn.disabled = true;
       fetchBtn.textContent = "Fetching…";
+      const existingOut = row.querySelector(".fetch-result");
+      if (existingOut) existingOut.remove();
       const out = document.createElement("div");
-      out.className = "fetch-result";
+      out.className = "fetch-result loading";
       out.textContent = "Fetching from network…";
       row.appendChild(out);
       try {
         const { data, title: t } = await fetchPrivateEntry(e.id);
         const detected = detectContent(data);
         out.innerHTML = "";
+        out.classList.remove("loading");
+        addCloseButton(out);
         const meta2 = document.createElement("div");
         meta2.className = "fetch-meta";
         meta2.textContent = `${detected.type} · ${formatSize(data.length)}`;
@@ -1914,7 +2068,9 @@ function renderPrivateEtches(): void {
         }
       } catch (err) {
         out.innerHTML = "";
+        out.classList.remove("loading");
         appendError(out, `Fetch failed: ${(err as Error).message ?? String(err)}`);
+        addCloseButton(out);
       } finally {
         fetchBtn.disabled = false;
         fetchBtn.textContent = "Fetch";
@@ -2048,27 +2204,6 @@ $("walletBtn").addEventListener("click", () => {
 setInterval(() => { void refreshAntBalance(); }, 30_000);
 
 // ── Settings (Phase 3d) ──────────────────────────────────────────
-
-// Mirrors Terms.kt on Android. Same wording across clients.
-const TERMS_TEXT = `By using etchit you agree:
-
-1. You own what you etch. Don't upload material that infringes copyright, violates the law, or that you don't have the right to share.
-
-2. No illegal content. No CSAM, no malware, no content that harms others.
-
-3. Etches are permanent. Once written to the Autonomi network, content cannot be deleted — by you, by us, or by anyone.
-
-4. Your data map is the only key to a private etch. Treat it like a password — keep it secure, don't expose it. Loss or compromise means loss of privacy, and we cannot revoke access.
-
-5. Your wallet, your keys, your costs. etchit never holds your private keys. You sign every transaction yourself, and you pay the gas and ANT cost.
-
-6. No warranty. etchit is provided as-is. The Autonomi network and Arbitrum RPC are operated by third parties; we don't guarantee uptime, data availability, or recoverability.
-
-7. No data recovery. If you lose a private data map, the content is gone. We cannot recover it.
-
-8. You are responsible for what you post. etchit is a client app, not a host. We do not monitor, scan, or moderate content. Misuse is your liability.
-
-9. No refunds for failed uploads. Network errors, app crashes, transaction failures, or any other technical issue during an etch may result in spent ANT or gas with no content stored. Blockchain transactions cannot be reversed and we cannot refund.`;
 
 function initSettingsUI(): void {
   $("termsText").textContent = TERMS_TEXT;
@@ -2214,40 +2349,78 @@ function initSettingsUI(): void {
     pwStrengthEl.className = "status" + (s.cls ? ` ${s.cls}` : "");
   });
 
-  $("createBackupBtn").addEventListener("click", async () => {
+  // Validates the password fields and saved-confirmation checkbox; on
+  // success returns {plaintext, entries, encrypted} ready to be either
+  // etched or saved to disk. Sets status on failure and returns null.
+  async function prepareBackupBlob(): Promise<{ encrypted: Uint8Array; entries: number } | null> {
     const pw = pwInput.value;
     const pwConfirm = pwConfirmInput.value;
+    const savedCheckbox = $<HTMLInputElement>("backupPasswordSaved");
     if (pw.length < MIN_BACKUP_PASSWORD_LEN) {
-      setBackupStatus(`Password too short (min ${MIN_BACKUP_PASSWORD_LEN}).`, "err");
-      return;
+      setBackupStatus(`Password too short (min ${MIN_BACKUP_PASSWORD_LEN}).`, "err"); return null;
     }
     if (pw !== pwConfirm) {
-      setBackupStatus("Passwords don't match.", "err");
-      return;
+      setBackupStatus("Passwords don't match.", "err"); return null;
     }
+    if (!savedCheckbox.checked) {
+      setBackupStatus("Confirm you've saved the password somewhere safe.", "err"); return null;
+    }
+    setBackupStatus("Building plaintext…", "warn");
+    const { plaintext, entries } = await buildBackupPlaintext();
+    if (entries === 0) {
+      setBackupStatus("No private etches to back up.", "err"); return null;
+    }
+    setBackupStatus(`Encrypting ${entries} entr${entries === 1 ? "y" : "ies"}…`, "warn");
+    const encrypted = await backupEncrypt(plaintext, pw);
+    return { encrypted, entries };
+  }
+
+  function clearBackupForm(): void {
+    pwInput.value = "";
+    pwConfirmInput.value = "";
+    pwStrengthEl.textContent = "";
+    pwStrengthEl.className = "status";
+    $<HTMLInputElement>("backupPasswordSaved").checked = false;
+  }
+
+  $("createBackupBtn").addEventListener("click", async () => {
     const btn = $<HTMLButtonElement>("createBackupBtn");
     btn.disabled = true;
     $("backupResult").innerHTML = "";
     try {
-      setBackupStatus("Building plaintext…", "warn");
-      const { plaintext, entries } = await buildBackupPlaintext();
-      if (entries === 0) {
-        setBackupStatus("No private etches to back up.", "err");
-        return;
-      }
-      setBackupStatus(`Encrypting ${entries} entr${entries === 1 ? "y" : "ies"}…`, "warn");
-      const encrypted = await backupEncrypt(plaintext, pw);
-      setBackupStatus(`Etching ${formatSize(encrypted.length)} backup…`, "warn");
-      const result = await uploadPublicBytes(encrypted, "Backup");
+      const prep = await prepareBackupBlob();
+      if (!prep) return;
+      setBackupStatus(`Etching ${formatSize(prep.encrypted.length)} backup…`, "warn");
+      const result = await uploadPublicBytes(prep.encrypted, "Backup");
       setBackupStatus("Done.", "ok");
-      showBackupResultPanel(result.address, entries);
-      pwInput.value = "";
-      pwConfirmInput.value = "";
-      pwStrengthEl.textContent = "";
-      pwStrengthEl.className = "status";
+      showBackupResultPanel(result.address, prep.entries);
+      clearBackupForm();
       const w = knownWallet();
       if (w) pushHistoryPublic(w, result.address, "Backup");
       void refreshAntBalance();
+    } catch (e) {
+      setBackupStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $("downloadBackupBtn").addEventListener("click", async () => {
+    const btn = $<HTMLButtonElement>("downloadBackupBtn");
+    btn.disabled = true;
+    $("backupResult").innerHTML = "";
+    try {
+      const prep = await prepareBackupBlob();
+      if (!prep) return;
+      const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      const defaultName = `etchit-backup-${ts}.etchitbk`;
+      setBackupStatus("Choose where to save…", "warn");
+      const path = await save({ defaultPath: defaultName });
+      if (!path) { setBackupStatus("Cancelled.", "warn"); return; }
+      setBackupStatus("Writing file…", "warn");
+      await invoke("save_bytes", { path, bytes: Array.from(prep.encrypted) });
+      setBackupStatus(`Saved · ${prep.entries} entr${prep.entries === 1 ? "y" : "ies"} encrypted · ${path}`, "ok");
+      clearBackupForm();
     } catch (e) {
       setBackupStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
     } finally {
@@ -2261,39 +2434,76 @@ function initSettingsUI(): void {
     el.textContent = msg;
     el.className = "status" + (cls ? ` ${cls}` : "");
   };
+  async function performRestore(bytes: Uint8Array, pw: string): Promise<void> {
+    const detected = detectContent(bytes);
+    if (detected.type !== "backup") {
+      setRestoreStatus("That data isn't an encrypted etchit backup.", "err"); return;
+    }
+    setRestoreStatus("Decrypting…", "warn");
+    const plaintext = await backupDecrypt(bytes, pw);
+    if (!plaintext) {
+      setRestoreStatus("Decrypt failed — wrong password or corrupted backup.", "err"); return;
+    }
+    setRestoreStatus("Importing into local private store…", "warn");
+    const { imported, skipped } = await importBackupPlaintext(plaintext);
+    setRestoreStatus(`Restored ${imported} new entr${imported === 1 ? "y" : "ies"}${skipped ? ` (skipped ${skipped} duplicate${skipped === 1 ? "" : "s"})` : ""}.`, "ok");
+    $<HTMLInputElement>("restorePassword").value = "";
+  }
+
   $("restoreBackupBtn").addEventListener("click", async () => {
     const addrRaw = $<HTMLInputElement>("restoreAddr").value.trim().toLowerCase().replace(/^0x/, "");
     const pw = $<HTMLInputElement>("restorePassword").value;
     if (!/^[0-9a-f]{64}$/.test(addrRaw)) { setRestoreStatus("Invalid address (need 64 hex chars).", "err"); return; }
     if (!pw) { setRestoreStatus("Password is required.", "err"); return; }
-    if (!inTauri) { setRestoreStatus("Restore requires the desktop app (no FFI in plain browser).", "err"); return; }
+    if (!inTauri) { setRestoreStatus("Restore from network requires the desktop app (no FFI in plain browser).", "err"); return; }
 
     const btn = $<HTMLButtonElement>("restoreBackupBtn");
     btn.disabled = true;
     try {
       setRestoreStatus("Fetching backup from network…", "warn");
       const arr = await invoke<number[]>("fetch_public", { addrHex: addrRaw });
-      const bytes = Uint8Array.from(arr);
-      const detected = detectContent(bytes);
-      if (detected.type !== "backup") {
-        setRestoreStatus("That address is not an encrypted etchit backup.", "err");
-        return;
-      }
-      setRestoreStatus("Decrypting…", "warn");
-      const plaintext = await backupDecrypt(bytes, pw);
-      if (!plaintext) {
-        setRestoreStatus("Decrypt failed — wrong password or corrupted backup.", "err");
-        return;
-      }
-      setRestoreStatus("Importing into local private store…", "warn");
-      const { imported, skipped } = await importBackupPlaintext(plaintext);
-      setRestoreStatus(`Restored ${imported} new entr${imported === 1 ? "y" : "ies"}${skipped ? ` (skipped ${skipped} duplicate${skipped === 1 ? "" : "s"})` : ""}.`, "ok");
-      $<HTMLInputElement>("restorePassword").value = "";
+      await performRestore(Uint8Array.from(arr), pw);
     } catch (e) {
       setRestoreStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
     } finally {
       btn.disabled = false;
     }
+  });
+
+  // Restore-from-file: pick a local .etchitbk, decrypt with password, import
+  let pendingRestoreFile: File | null = null;
+  $("pickRestoreFileBtn").addEventListener("click", () => $<HTMLInputElement>("restoreFileInput").click());
+  $("restoreFileInput").addEventListener("change", async (ev) => {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    pendingRestoreFile = file;
+    $("restoreFileLabel").textContent = `${file.name} · ${formatSize(file.size)} · enter password and click below`;
+
+    // Replace label area with an explicit Restore button that uses this file
+    const labelEl = $("restoreFileLabel");
+    if (labelEl.nextElementSibling?.id === "restoreFromFileBtn") return; // already added
+    const restoreBtn = document.createElement("button");
+    restoreBtn.id = "restoreFromFileBtn";
+    restoreBtn.style.marginLeft = "8px";
+    restoreBtn.textContent = "Restore from file";
+    restoreBtn.onclick = async () => {
+      if (!pendingRestoreFile) { setRestoreStatus("No file selected.", "err"); return; }
+      const pw = $<HTMLInputElement>("restorePassword").value;
+      if (!pw) { setRestoreStatus("Password is required.", "err"); return; }
+      restoreBtn.disabled = true;
+      try {
+        setRestoreStatus("Reading file…", "warn");
+        const bytes = new Uint8Array(await pendingRestoreFile.arrayBuffer());
+        await performRestore(bytes, pw);
+      } catch (e) {
+        setRestoreStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
+      } finally {
+        restoreBtn.disabled = false;
+      }
+    };
+    labelEl.parentElement?.appendChild(restoreBtn);
   });
 
   // Etch history
@@ -2409,6 +2619,15 @@ function appendError(parent: HTMLElement, msg: string): void {
   e.className = "fetch-err";
   e.textContent = msg;
   parent.appendChild(e);
+}
+
+function addCloseButton(panel: HTMLElement): void {
+  const btn = document.createElement("button");
+  btn.className = "fetch-close";
+  btn.title = "Close";
+  btn.textContent = "×";
+  btn.onclick = () => panel.remove();
+  panel.appendChild(btn);
 }
 
 function suggestedFilename(title: string, ext: string): string {
