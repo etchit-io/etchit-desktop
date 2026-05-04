@@ -1835,7 +1835,7 @@ class MainActivity : AppCompatActivity() {
 
                     if (visible.isEmpty()) {
                         container.addView(muted(
-                            "No entries loaded. Tap Restore to fetch from chain, or Add by address to add one.",
+                            "No entries loaded. Tap Sync chainmarks to fetch from chain, or Add by address to add one.",
                             bottomMarginDp = 8))
                     } else {
                         container.addView(muted("${visible.size} entr${if (visible.size == 1) "y" else "ies"}", bottomMarginDp = 8))
@@ -1847,15 +1847,15 @@ class MainActivity : AppCompatActivity() {
                         container.addView(list)
                     }
 
-                    container.addView(primaryButton("Restore from chain", topMarginDp = 16) {
+                    container.addView(primaryButton("Sync chainmarks", topMarginDp = 16) {
                         lifecycleScope.launch {
                             try {
-                                showStatus("Fetching chainmarks…")
+                                showStatus("Syncing chainmarks…")
                                 chainmarkController.restoreFromChain(wallet)
-                                showStatus("Chainmarks updated.")
+                                showStatus("Chainmarks synced.")
                                 render()
                             } catch (e: Exception) {
-                                showStatus("Restore failed: ${e.message}", isError = true)
+                                showStatus("Sync failed: ${e.message}", isError = true)
                             }
                         }
                     })
@@ -2085,7 +2085,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 try {
                     chainmarkController.importKey(walletAddress, bytes)
-                    showStatus("Chainmark key restored. Tap Restore from chain.")
+                    showStatus("Chainmark key restored. Tap Sync chainmarks.")
                     onDone()
                 } catch (e: Exception) {
                     showStatus("Restore failed: ${e.message}", isError = true)
