@@ -1,6 +1,6 @@
 // etchit desktop frontend.
 //
-// Library viewer ported from tools/library.html in etchit-android-v3.
+// Chain/it (chainmarks) viewer ported from tools/chainmarks.html in etchit-android-v3.
 // Phase 2 wires the Tauri Rust backend (ant-ffi) so content can be
 // fetched in-app instead of shelling out to ant-cli.
 
@@ -67,22 +67,22 @@ const VERSION_BYTE = 0x01;
 const NONCE_LEN = 12;
 const TAG_LEN = 16;
 const BUCKETS = [1024, 4096, 16384] as const;
-const RECIPIENT_PREFIX = new TextEncoder().encode("etchit-library-v1/recipient");
+const RECIPIENT_PREFIX = new TextEncoder().encode("etchit-chainmark-v1/recipient");
 
 // =================================================================
-//  FROZEN — library v1 protocol message (cross-client contract)
+//  FROZEN — chainmark v1 protocol message (cross-client contract)
 // =================================================================
-// Locked in docs/library-format-v1.md (§4.1). Mobile (Kotlin),
+// Locked in docs/chainmark-format-v1.md (§4.1). Mobile (Kotlin),
 // web viewer (JS), Python CLI, and this client must all sign the
 // SAME bytes — otherwise the derived key differs and cross-device
-// library sync breaks.
+// chainmark sync breaks.
 //
-// 137 bytes UTF-8.
-// SHA-256: 5163bfeff8f6fa44563730938abbe6a23b35aa890868754e22ff15af7666c0d5
+// 131 bytes UTF-8.
+// SHA-256: ab6f4ae288e6053c3e2181c83e33065c870a8b58b76b1d6b0072aba658cecab0
 // =================================================================
 const SIGN_MESSAGE =
-  "etchit library v1\n\n" +
-  "Sign this message to derive your encrypted-library key. " +
+  "etchit chainmark v1\n\n" +
+  "Sign this message to derive your chainmark key. " +
   "This signature does NOT authorize any transaction or transfer.";
 
 // =================================================================
@@ -108,14 +108,14 @@ const SIGN_MESSAGE_PRIVATE =
   "authorize any transaction or transfer.";
 
 // FROZEN — Spec §4.3 (cross-client). Mobile, web viewer, and Python
-// CLI hash the same string. Any edit silently breaks library sync.
-const HKDF_INFO = new TextEncoder().encode("etchit-library/v1/aead-key");
+// CLI hash the same string. Any edit silently breaks chainmark sync.
+const HKDF_INFO = new TextEncoder().encode("etchit-chainmark/v1/aead-key");
 
 // Defence-in-depth: hash the frozen sign messages at startup and abort
 // loudly if either has drifted. A silent edit to either string would
 // silently change the derived keys and corrupt user data; this turns
 // that into a hard failure instead.
-const SIGN_MESSAGE_SHA256 = "5163bfeff8f6fa44563730938abbe6a23b35aa890868754e22ff15af7666c0d5";
+const SIGN_MESSAGE_SHA256 = "ab6f4ae288e6053c3e2181c83e33065c870a8b58b76b1d6b0072aba658cecab0";
 const SIGN_MESSAGE_PRIVATE_SHA256 = "761f194f8756aba672cd7c502a5a3aaf2d4908c5cf9420a702090d4992febc7d";
 
 async function sha256Hex(s: string): Promise<string> {
@@ -128,7 +128,7 @@ async function assertSignMessagesPinned(): Promise<void> {
   if (lib !== SIGN_MESSAGE_SHA256) {
     throw new Error(
       `SIGN_MESSAGE bytes drifted from spec (got ${lib}, expected ${SIGN_MESSAGE_SHA256}). ` +
-      `Library cross-device sync is broken. Revert the message or bump the protocol version.`,
+      `Chainmark cross-device sync is broken. Revert the message or bump the protocol version.`,
     );
   }
   const priv = await sha256Hex(SIGN_MESSAGE_PRIVATE);
@@ -142,12 +142,12 @@ async function assertSignMessagesPinned(): Promise<void> {
 
 void assertSignMessagesPinned();
 // FROZEN — desktop-local. Distinct from HKDF_INFO so backing up the
-// library key doesn't leak data-maps and vice-versa. Any edit silently
+// chainmark key doesn't leak data-maps and vice-versa. Any edit silently
 // makes existing private etches undecryptable. Bump v1 -> v2 + add a
 // migration if you need to change.
 const HKDF_INFO_PRIVATE_STORAGE = new TextEncoder().encode("etchit-private-storage/v1/data-map-key");
 
-type LibraryEntry = {
+type ChainmarkEntry = {
   addr: string;
   title: string;
   ts: number;
@@ -239,7 +239,7 @@ async function openBlob(keyMaterial: Uint8Array, blob: Uint8Array): Promise<Uint
 
 // ── replay (§11) ─────────────────────────────────────────────────
 
-function applyEntries(state: Map<string, LibraryEntry>, entries: WireEntry[]): void {
+function applyEntries(state: Map<string, ChainmarkEntry>, entries: WireEntry[]): void {
   for (const e of entries) {
     if (e.kind !== "public") continue;
     const addr = typeof e.addr === "string" ? e.addr : "";
@@ -259,7 +259,7 @@ function applyEntries(state: Map<string, LibraryEntry>, entries: WireEntry[]): v
 
 // ── BlockScout fetch + filter ────────────────────────────────────
 
-async function fetchAndDecode(walletAddr: string, keyMaterial: Uint8Array, indexerBase: string): Promise<LibraryEntry[]> {
+async function fetchAndDecode(walletAddr: string, keyMaterial: Uint8Array, indexerBase: string): Promise<ChainmarkEntry[]> {
   const url = `${indexerBase}?module=account&action=txlist&address=${encodeURIComponent(walletAddr)}&sort=asc`;
   const r = await fetch(url);
   if (!r.ok) throw new Error(`indexer HTTP ${r.status}`);
@@ -291,7 +291,7 @@ async function fetchAndDecode(walletAddr: string, keyMaterial: Uint8Array, index
   }
   decoded.sort((a, b) => a.blockNum - b.blockNum || a.txIndex - b.txIndex);
 
-  const state = new Map<string, LibraryEntry>();
+  const state = new Map<string, ChainmarkEntry>();
   for (const d of decoded) applyEntries(state, d.entries);
   return Array.from(state.values());
 }
@@ -341,10 +341,10 @@ async function waitForAppKitConnection(): Promise<string> {
   });
 }
 
-// Cached wallet-derived keys. Library and private-storage are derived
+// Cached wallet-derived keys. Chainmark and private-storage are derived
 // from independent personal_sign calls (different messages) so a user
 // who signs one isn't unknowingly authorizing the other.
-let walletKeys: { wallet: string; libraryKey?: Uint8Array; storageKey?: Uint8Array } | null = null;
+let walletKeys: { wallet: string; chainmarkKey?: Uint8Array; storageKey?: Uint8Array } | null = null;
 
 async function ensureWalletConnected(): Promise<{ wallet: string; provider: Eip1193Provider }> {
   const wallet = await waitForAppKitConnection();
@@ -371,10 +371,10 @@ async function signAndDerive(message: string, info: Uint8Array, label: string): 
   return await deriveKeyFromSig(sigHex, info);
 }
 
-async function ensureLibraryKey(): Promise<{ wallet: string; key: Uint8Array }> {
-  if (walletKeys?.libraryKey) return { wallet: walletKeys.wallet, key: walletKeys.libraryKey };
-  const key = await signAndDerive(SIGN_MESSAGE, HKDF_INFO, "sign the library-derive message in your wallet");
-  walletKeys = { ...(walletKeys ?? { wallet: (await ensureWalletConnected()).wallet }), libraryKey: key };
+async function ensureChainmarkKey(): Promise<{ wallet: string; key: Uint8Array }> {
+  if (walletKeys?.chainmarkKey) return { wallet: walletKeys.wallet, key: walletKeys.chainmarkKey };
+  const key = await signAndDerive(SIGN_MESSAGE, HKDF_INFO, "sign the chainmark-derive message in your wallet");
+  walletKeys = { ...(walletKeys ?? { wallet: (await ensureWalletConnected()).wallet }), chainmarkKey: key };
   return { wallet: walletKeys.wallet, key };
 }
 
@@ -387,16 +387,16 @@ async function ensureStorageKey(): Promise<{ wallet: string; key: Uint8Array }> 
 
 // Backwards-compatible name kept for the existing Connect-wallet handler.
 async function connectAndDeriveKey(): Promise<{ wallet: string; key: Uint8Array }> {
-  return await ensureLibraryKey();
+  return await ensureChainmarkKey();
 }
 
-// ── Library write (Phase 3b) ─────────────────────────────────────
+// ── Chainmark write (Phase 3b) ─────────────────────────────────────
 //
-// Mirrors LibraryCrypto.seal + LibrarySync.sendBatch on Android. Encodes
+// Mirrors ChainmarkCrypto.seal + ChainmarkSync.sendBatch on Android. Encodes
 // a one-entry payload, AES-GCM-seals it with bucket padding, computes the
 // per-tx recipient, and sends a 0-value Arbitrum tx via the wallet.
 
-async function sealLibraryBatch(key: Uint8Array, payload: Uint8Array): Promise<Uint8Array | null> {
+async function sealChainmarkBatch(key: Uint8Array, payload: Uint8Array): Promise<Uint8Array | null> {
   let bucketId = -1;
   let bucketSize = 0;
   for (let i = 0; i < BUCKETS.length; i++) {
@@ -422,10 +422,10 @@ async function sealLibraryBatch(key: Uint8Array, payload: Uint8Array): Promise<U
   return blob;
 }
 
-type LibraryAction = "add" | "bookmark" | "hide";
+type ChainmarkAction = "add" | "bookmark" | "hide";
 
-async function addToLibrary(addr: string, title: string, action: LibraryAction = "add"): Promise<string> {
-  const { wallet, key } = await ensureLibraryKey();
+async function addToChainmarks(addr: string, title: string, action: ChainmarkAction = "add"): Promise<string> {
+  const { wallet, key } = await ensureChainmarkKey();
   const walletProvider = appKit.getWalletProvider() as Eip1193Provider | undefined;
   if (!walletProvider) throw new Error("Wallet provider unavailable.");
 
@@ -438,13 +438,13 @@ async function addToLibrary(addr: string, title: string, action: LibraryAction =
   };
   const payloadJson = JSON.stringify({ v: 1, entries: [wireEntry] });
   const payload = new TextEncoder().encode(payloadJson);
-  const blob = await sealLibraryBatch(key, payload);
-  if (!blob) throw new Error("Library entry too large for max bucket.");
+  const blob = await sealChainmarkBatch(key, payload);
+  if (!blob) throw new Error("Chainmark entry too large for max bucket.");
 
   const recipient = await recipientForBlob(blob);
   const calldata = "0x" + bytesToHex(blob);
   await ensureArbitrumChain(walletProvider);
-  return await withWalletPrompt("sign the library update in your wallet", async () =>
+  return await withWalletPrompt("sign the chainmark update in your wallet", async () =>
     (await walletProvider.request({
       method: "eth_sendTransaction",
       params: [{ from: wallet, to: recipient, data: calldata, value: "0x0" }],
@@ -466,14 +466,14 @@ function setStatus(id: string, msg: string, cls: string = ""): void {
   el.className = "status " + cls;
 }
 
-function render(entries: LibraryEntry[]): void {
+function render(entries: ChainmarkEntry[]): void {
   const root = $("results");
   root.innerHTML = "";
   const visible = entries.filter((e) => !e.hidden).sort((a, b) => b.ts - a.ts);
   if (!visible.length) {
     const div = document.createElement("div");
     div.className = "empty";
-    div.textContent = "Library is empty (or all entries are hidden).";
+    div.textContent = "No chainmarks yet (or all entries are hidden).";
     root.appendChild(div);
     return;
   }
@@ -563,16 +563,16 @@ function render(entries: LibraryEntry[]): void {
         confirm.disabled = true;
         confirm.textContent = "Signing…";
         try {
-          const txHash = await addToLibrary(e.addr, e.title || "", "hide");
+          const txHash = await addToChainmarks(e.addr, e.title || "", "hide");
           confirm.textContent = `Waiting (${txHash.slice(0, 10)}…)`;
           await rpc.waitForTransaction(txHash);
           // Optimistic local update — the BlockScout indexer will catch
           // up in 30-60s; meanwhile mark hidden in the in-memory cache
           // so the row disappears immediately.
-          currentLibraryEntries = currentLibraryEntries.map((x) =>
+          currentChainmarks = currentChainmarks.map((x) =>
             x.addr === e.addr ? { ...x, hidden: true } : x,
           );
-          render(currentLibraryEntries);
+          render(currentChainmarks);
           setStatus("status", "Entry hidden", "ok");
         } catch (err) {
           actions.replaceWith(original as HTMLElement);
@@ -590,18 +590,18 @@ function render(entries: LibraryEntry[]): void {
   }
 }
 
-// Cache of decoded library entries — kept in module scope so optimistic
+// Cache of decoded chainmark entries — kept in module scope so optimistic
 // add / hide can mutate the rendered list without re-running the full
 // BlockScout decode (which won't see new txs until the indexer catches
 // up, ~30-60s).
-let currentLibraryEntries: LibraryEntry[] = [];
+let currentChainmarks: ChainmarkEntry[] = [];
 
 async function runDecode(wallet: string, keyBytes: Uint8Array): Promise<void> {
   const indexer = readSavedIndexer() ?? $<HTMLInputElement>("indexer").value.trim();
   setStatus("status", "Fetching from indexer…");
   $("results").innerHTML = "";
   const entries = await fetchAndDecode(wallet, keyBytes, indexer);
-  currentLibraryEntries = entries;
+  currentChainmarks = entries;
   render(entries);
   const visible = entries.filter((e) => !e.hidden).length;
   setStatus("status", `Decoded ${entries.length} entries (${visible} visible).`, "ok");
@@ -623,7 +623,7 @@ $("addByAddrBtn").addEventListener("click", async () => {
   btn.disabled = true;
   setAddStatus("Sending tx…", "warn");
   try {
-    const txHash = await addToLibrary(rawAddr, title, "add");
+    const txHash = await addToChainmarks(rawAddr, title, "add");
     setAddStatus(`Waiting (${txHash.slice(0, 10)}…)`, "warn");
     const receipt = await rpc.waitForTransaction(txHash);
     if (!receipt) {
@@ -635,17 +635,17 @@ $("addByAddrBtn").addEventListener("click", async () => {
       return;
     }
     // Tx confirmed on chain — safe to optimistically merge until next decode.
-    const newEntry: LibraryEntry = {
+    const newEntry: ChainmarkEntry = {
       addr: rawAddr,
       title,
       ts: Math.floor(Date.now() / 1000),
       bookmark: false,
       hidden: false,
     };
-    currentLibraryEntries = currentLibraryEntries
+    currentChainmarks = currentChainmarks
       .filter((e) => e.addr !== rawAddr)
       .concat(newEntry);
-    render(currentLibraryEntries);
+    render(currentChainmarks);
     setAddStatus("Added.", "ok");
     $<HTMLInputElement>("addAddr").value = "";
     $<HTMLInputElement>("addTitle").value = "";
@@ -667,7 +667,7 @@ $("connect").addEventListener("click", async () => {
   setStatus("connectStatus", "");
   setStatus("status", "");
   // Require wallet to be connected first via the wallet bar — keeps
-  // wallet-connect and library-derive as two distinct user actions
+  // wallet-connect and chainmark-derive as two distinct user actions
   // instead of bundling them into one prompt sequence.
   if (!knownWallet()) {
     setStatus("connectStatus", "Connect a wallet first.", "err");
@@ -676,13 +676,13 @@ $("connect").addEventListener("click", async () => {
   const btn = $<HTMLButtonElement>("connect");
   btn.disabled = true;
   try {
-    setStatus("connectStatus", "Requesting library-derive signature…");
-    const { wallet, key } = await ensureLibraryKey();
+    setStatus("connectStatus", "Requesting chainmark-derive signature…");
+    const { wallet, key } = await ensureChainmarkKey();
     setStatus("connectStatus", `Connected ${wallet.slice(0, 6)}…${wallet.slice(-4)}`, "ok");
     await runDecode(wallet, key);
   } catch (e) {
     const msg = (e as Error)?.message || String(e) || "(no error message)";
-    console.error("Open library failed:", e);
+    console.error("Open chain/it failed:", e);
     setStatus("connectStatus", `Failed: ${msg}`, "err");
   } finally {
     btn.disabled = false;
@@ -690,7 +690,7 @@ $("connect").addEventListener("click", async () => {
 });
 
 // Clear all transient UI state — typed text, status messages, error
-// banners, in-line fetch result panels. Doesn't touch wallet, library,
+// banners, in-line fetch result panels. Doesn't touch wallet, chainmarks,
 // private etches, history, or in-flight etches.
 $("resetView").addEventListener("click", () => {
   $<HTMLInputElement>("etchTitle").value = "";
@@ -716,7 +716,7 @@ $("decodeManual").addEventListener("click", async () => {
     return setStatus("status", "Invalid wallet address (need 0x + 40 hex chars).", "err");
   }
   if (!/^[0-9a-fA-F]{64}$/.test(keyHex)) {
-    return setStatus("status", `Invalid library key (need 64 hex chars, got ${keyHex.length}).`, "err");
+    return setStatus("status", `Invalid chainmark key (need 64 hex chars, got ${keyHex.length}).`, "err");
   }
 
   const btn = $<HTMLButtonElement>("decodeManual");
@@ -1663,34 +1663,34 @@ function showEtchResult(result: PublicEtchResult, title: string): void {
 
   const addBtn = document.createElement("button");
   addBtn.className = "outlined";
-  addBtn.textContent = "Add to library";
+  addBtn.textContent = "Add to chainmarks";
   addBtn.onclick = async () => {
     addBtn.disabled = true;
     libStatus.style.color = "var(--ash)";
     try {
       if (!walletKeys) {
         // Derive on demand — same flow as Connect wallet, but without
-        // running the full library decode after.
-        libStatus.textContent = "Sign library-derive message in your wallet…";
+        // running the full chain/it decode after.
+        libStatus.textContent = "Sign chainmark-derive message in your wallet…";
         await connectAndDeriveKey();
       }
-      libStatus.textContent = "Sign library update in your wallet…";
-      const txHash = await addToLibrary(result.address, title || "");
+      libStatus.textContent = "Sign chainmark update in your wallet…";
+      const txHash = await addToChainmarks(result.address, title || "");
       libStatus.style.color = "var(--copper)";
       libStatus.textContent = `Waiting for confirmation (${txHash.slice(0, 10)}…)`;
       const receipt = await rpc.waitForTransaction(txHash);
       if (receipt?.status === 1) {
         libStatus.style.color = "var(--green)";
-        libStatus.textContent = `Added to library · ${txHash.slice(0, 10)}…`;
+        libStatus.textContent = `Added to chainmarks · ${txHash.slice(0, 10)}…`;
         addBtn.textContent = "Added";
       } else {
         libStatus.style.color = "var(--red)";
-        libStatus.textContent = `Library update reverted (${txHash})`;
+        libStatus.textContent = `Chainmark update reverted (${txHash})`;
         addBtn.disabled = false;
       }
     } catch (e) {
       libStatus.style.color = "var(--red)";
-      libStatus.textContent = `Library add failed: ${(e as Error).message ?? String(e)}`;
+      libStatus.textContent = `Chainmark add failed: ${(e as Error).message ?? String(e)}`;
       addBtn.disabled = false;
     }
   };
@@ -2300,28 +2300,28 @@ function initSettingsUI(): void {
     setIndexerStatus("saved", "ok");
   });
 
-  // Library key — backup / restore
-  const libKeyOut = $("libraryKeyOutput");
+  // Chainmark key — backup / restore
+  const libKeyOut = $("chainmarkKeyOutput");
   const setLibKeyStatus = (msg: string, cls: "ok" | "err" | "warn" | "" = "") => {
-    const el = $("libraryKeyStatus");
+    const el = $("chainmarkKeyStatus");
     el.textContent = msg;
     el.className = "status" + (cls ? ` ${cls}` : "");
   };
 
-  let libraryKeyVisible = false;
-  const showBtn = $<HTMLButtonElement>("showLibraryKeyBtn");
+  let chainmarkKeyVisible = false;
+  const showBtn = $<HTMLButtonElement>("showChainmarkKeyBtn");
   const hideKey = (): void => {
     libKeyOut.innerHTML = "";
-    libraryKeyVisible = false;
-    showBtn.textContent = "Show library key";
+    chainmarkKeyVisible = false;
+    showBtn.textContent = "Show chainmark key";
   };
 
   showBtn.addEventListener("click", async () => {
-    if (libraryKeyVisible) { hideKey(); return; }
+    if (chainmarkKeyVisible) { hideKey(); return; }
     setLibKeyStatus("");
     libKeyOut.innerHTML = "";
     try {
-      const { key } = await ensureLibraryKey();
+      const { key } = await ensureChainmarkKey();
       const hex = bytesToHex(key);
 
       const block = document.createElement("div");
@@ -2331,7 +2331,7 @@ function initSettingsUI(): void {
       warn.className = "fetch-meta";
       warn.style.color = "var(--copper)";
       warn.style.marginBottom = "6px";
-      warn.textContent = "Treat this like a password. Anyone with this key + your wallet address can read your library.";
+      warn.textContent = "Treat this like a password. Anyone with this key + your wallet address can read your chainmarks.";
       block.appendChild(warn);
 
       const code = document.createElement("div");
@@ -2355,17 +2355,17 @@ function initSettingsUI(): void {
       block.appendChild(copyBtn);
 
       libKeyOut.appendChild(block);
-      libraryKeyVisible = true;
-      showBtn.textContent = "Hide library key";
+      chainmarkKeyVisible = true;
+      showBtn.textContent = "Hide chainmark key";
     } catch (e) {
       setLibKeyStatus(`failed: ${(e as Error).message ?? String(e)}`, "err");
     }
   });
 
-  $("forgetLibraryBtn").addEventListener("click", () => {
+  $("forgetChainmarkBtn").addEventListener("click", () => {
     walletKeys = null;
     hideKey();
-    currentLibraryEntries = [];
+    currentChainmarks = [];
     $("results").innerHTML = "";
     setLibKeyStatus("forgotten — keys re-derive on next sign", "ok");
   });

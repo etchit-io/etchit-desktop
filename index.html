@@ -74,10 +74,10 @@
       </details>
 
       <details class="section-collapse">
-        <summary class="section-title-summary">Library <span class="info" data-tip="Pulls your encrypted library entries from Arbitrum and decrypts them locally. Uses your wallet to sign a derive-key message (same as the mobile app), no copy-paste of the library key needed.">i</span></summary>
+        <summary class="section-title-summary">chain/it <span class="info" data-tip="Your wallet's chainmarks — etch addresses you've saved, encrypted on Arbitrum and synced via wallet identity. Uses your wallet to sign a derive-key message (same as the mobile app), no copy-paste of the chainmark key needed.">i</span></summary>
 
         <div class="controls" style="margin-top: 8px; margin-bottom: 8px;">
-          <button id="connect">Open library</button>
+          <button id="connect">Open chain/it</button>
           <span id="connectStatus" class="status"></span>
         </div>
 
@@ -88,7 +88,7 @@
           <label for="addTitle">Title (optional)</label>
           <input id="addTitle" type="text" placeholder="e.g. index.html" autocomplete="off" />
           <div class="controls" style="margin-top: 12px;">
-            <button id="addByAddrBtn">Add to library</button>
+            <button id="addByAddrBtn">Add to chainmarks</button>
             <span id="addByAddrStatus" class="status"></span>
           </div>
         </details>
@@ -125,7 +125,7 @@
       </details>
 
       <details class="settings-block">
-        <summary>Library indexer</summary>
+        <summary>Chainmark indexer</summary>
         <p class="sub">Etherscan-V1-compatible base URL. Default is keyless BlockScout.</p>
         <input id="indexer" type="text" value="https://arbitrum.blockscout.com/api" autocomplete="off" spellcheck="false" />
         <div class="controls" style="margin-top: 12px;">
@@ -182,29 +182,29 @@
       </details>
 
       <details class="settings-block">
-        <summary>Library key — backup / restore</summary>
-        <p class="sub">The 32-byte AES key derived from your wallet. Shared across mobile + desktop + web viewer for the same wallet. Anyone with this key plus your wallet address can read your library.</p>
+        <summary>Chainmark key — backup / restore</summary>
+        <p class="sub">The 32-byte AES key derived from your wallet. Shared across mobile + desktop + web viewer for the same wallet. Anyone with this key plus your wallet address can read your chainmarks.</p>
         <div class="controls" style="margin-top: 6px;">
-          <button id="showLibraryKeyBtn">Show library key</button>
-          <button id="forgetLibraryBtn" class="outlined">Forget on this device</button>
-          <span id="libraryKeyStatus" class="status"></span>
+          <button id="showChainmarkKeyBtn">Show chainmark key</button>
+          <button id="forgetChainmarkBtn" class="outlined">Forget on this device</button>
+          <span id="chainmarkKeyStatus" class="status"></span>
         </div>
-        <div id="libraryKeyOutput" style="margin-top: 10px;"></div>
+        <div id="chainmarkKeyOutput" style="margin-top: 10px;"></div>
       </details>
 
       <details class="settings-block" id="manualSection">
-        <summary>Decode library with a manually-entered key</summary>
-        <p class="sub">Fallback for when a wallet sign isn't available — paste the wallet address and 64-hex library key directly.</p>
+        <summary>Decode chain/it with a manually-entered key</summary>
+        <p class="sub">Fallback for when a wallet sign isn't available — paste the wallet address and 64-hex chainmark key directly.</p>
         <label for="wallet">Wallet address</label>
         <input id="wallet" type="text" placeholder="0x… (40 hex chars)" autocomplete="off" spellcheck="false" />
 
-        <label for="key">Library key (Settings → Library key → Show library key)</label>
+        <label for="key">Chainmark key (Settings → Chainmark key → Show chainmark key)</label>
         <div style="display: flex; gap: 8px;">
           <input id="key" type="password" placeholder="64 hex chars" autocomplete="new-password" spellcheck="false" style="flex: 1;" />
           <button id="toggleKey" type="button" class="outlined" style="padding: 0 10px;">Show</button>
         </div>
         <div class="controls" style="margin-top: 12px;">
-          <button id="decodeManual">Decode library</button>
+          <button id="decodeManual">Decode chain/it</button>
         </div>
       </details>
 
