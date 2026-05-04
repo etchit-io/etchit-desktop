@@ -177,12 +177,14 @@ async fn fetch_private(data_map_hex: String, state: State<'_, AppState>) -> Resu
 pub fn run() {
     // Bridge log:: macros into tracing, then init a stderr fmt subscriber.
     // ant-core / ant-node / saorsa-* use both log + tracing; this captures
-    // both. Default filter is loud enough to see DHT activity but quiet on
-    // saorsa-transport's per-packet noise. Override with RUST_LOG.
+    // both. Default filter keeps DHT activity visible at warn level — the
+    // dht_network_manager module is silenced because it logs per-iteration
+    // dial attempts (tens of thousands of lines per second when peers are
+    // unreachable, which fills disk). Override with RUST_LOG.
     let _ = tracing_log::LogTracer::init();
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(
-            "info,ant_ffi=debug,ant_core=debug,ant_node=info,saorsa_transport=warn,saorsa_core=info"
+            "info,ant_ffi=debug,ant_core=debug,ant_node=info,saorsa_transport=warn,saorsa_core=warn,saorsa_core::dht_network_manager=error"
         ));
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
