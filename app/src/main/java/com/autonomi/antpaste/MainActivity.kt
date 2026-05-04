@@ -1801,7 +1801,7 @@ class MainActivity : AppCompatActivity() {
             container.addView(heading("chain/it"))
             container.addView(muted(
                 "An encrypted on-chain index of your public etches. Off until you set it up. " +
-                "Costs ~\$0.02–\$0.10 in ETH gas per sync. See README for the full privacy model."
+                "Each sync writes one Arbitrum transaction — your wallet shows the gas estimate before you sign. See README for the full privacy model."
             ))
 
             val session = walletSession.state.value
