@@ -10,6 +10,7 @@ import { createAppKit } from "@reown/appkit";
 import { EthersAdapter } from "@reown/appkit-adapter-ethers";
 import { arbitrum } from "@reown/appkit/networks";
 import { Interface, JsonRpcProvider, type Eip1193Provider } from "ethers";
+import { BIP39_WORDLIST } from "./wordlist-bip39";
 
 // EVM constants — match BuildConfig in etchit-android-v3/app/build.gradle.kts.
 const ARBITRUM_RPC = "https://arb1.arbitrum.io/rpc";
@@ -624,9 +625,16 @@ $("addByAddrBtn").addEventListener("click", async () => {
   try {
     const txHash = await addToLibrary(rawAddr, title, "add");
     setAddStatus(`Waiting (${txHash.slice(0, 10)}…)`, "warn");
-    await rpc.waitForTransaction(txHash);
-    // Optimistic merge: replace any existing entry for this addr (last
-    // action wins per spec replay) and re-render.
+    const receipt = await rpc.waitForTransaction(txHash);
+    if (!receipt) {
+      setAddStatus(`Tx ${txHash.slice(0, 10)}… didn't confirm — try again`, "err");
+      return;
+    }
+    if (receipt.status !== 1) {
+      setAddStatus(`Tx reverted (${txHash})`, "err");
+      return;
+    }
+    // Tx confirmed on chain — safe to optimistically merge until next decode.
     const newEntry: LibraryEntry = {
       addr: rawAddr,
       title,
@@ -1218,6 +1226,24 @@ async function backupDecrypt(data: Uint8Array, password: string): Promise<Uint8A
   }
 }
 
+// Diceware-style passphrase from the BIP-39 wordlist. 6 words = 66 bits
+// of entropy (log2(2048^6)), well above the EFF "valuable accounts"
+// recommendation. WebCrypto rejection-sampling avoids modulo bias on the
+// non-power-of-2 wordlist length (2048 IS a power of 2 so this is just
+// defense-in-depth — keeps the function honest if the list changes).
+function generatePassphrase(numWords: number = 6): string {
+  const words: string[] = [];
+  const max = BIP39_WORDLIST.length;
+  while (words.length < numWords) {
+    const buf = crypto.getRandomValues(new Uint16Array(numWords - words.length));
+    for (let i = 0; i < buf.length && words.length < numWords; i++) {
+      const v = buf[i];
+      if (v < 65536 - (65536 % max)) words.push(BIP39_WORDLIST[v % max]);
+    }
+  }
+  return words.join("-");
+}
+
 function passwordStrength(pw: string): { label: string; cls: "ok" | "err" | "warn" | "" } {
   if (!pw) return { label: "", cls: "" };
   const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter((re) => re.test(pw)).length;
@@ -1521,9 +1547,20 @@ async function etchPublic(text: string, title: string): Promise<PublicEtchResult
   return await uploadPublicBytes(buildEnvelope(text, title), title);
 }
 
+// Status setter signature shared by every section that drives a status
+// line (etch panel, backup section, etc). Lets uploadPublicBytes write
+// its progress to whichever section initiated the upload.
+type StatusSetter = (msg: string, cls?: "ok" | "err" | "warn" | "") => void;
+
 // Shared raw-bytes upload path — used by etchPublic (envelope-wrapped
-// text) and the backup flow (already-encrypted binary blob).
-async function uploadPublicBytes(data: Uint8Array, title: string): Promise<PublicEtchResult> {
+// text) and the backup flow (already-encrypted binary blob). Defaults
+// to the etch panel's status; backup passes its own setter so the
+// 'Finalizing upload…' spinner doesn't bleed into the etch panel.
+async function uploadPublicBytes(
+  data: Uint8Array,
+  title: string,
+  setStatus: StatusSetter = setEtchStatus,
+): Promise<PublicEtchResult> {
   if (!inTauri) throw new Error("Etching requires the desktop app (no FFI in plain browser).");
 
   const account = appKit.getAccount() as AppKitAccount | undefined;
@@ -1534,12 +1571,12 @@ async function uploadPublicBytes(data: Uint8Array, title: string): Promise<Publi
   if (!walletProvider) throw new Error("Wallet provider unavailable.");
 
   checkCancelled();
-  setEtchStatus("Collecting quotes from network…", "warn");
+  setStatus("Collecting quotes from network…", "warn");
   const prepared = await invoke<PreparedPublicEtch>("prepare_public_etch", { data: Array.from(data) });
   const totalAtto = BigInt(prepared.total_amount);
 
   checkCancelled();
-  setEtchStatus("Checking ANT allowance…", "warn");
+  setStatus("Checking ANT allowance…", "warn");
   const allowanceCalldata = erc20Iface.encodeFunctionData("allowance", [userAddress, VAULT_ADDRESS]);
   const allowanceHex = await ethCall(ANT_TOKEN_ADDRESS, allowanceCalldata);
   const allowance = BigInt(allowanceHex);
@@ -1547,17 +1584,17 @@ async function uploadPublicBytes(data: Uint8Array, title: string): Promise<Publi
 
   if (needsApproval) {
     checkCancelled();
-    setEtchStatus("Approve ANT in your wallet…", "warn");
+    setStatus("Approve ANT in your wallet…", "warn");
     const approveAmount = SESSION_BUDGET_ATTO > totalAtto ? SESSION_BUDGET_ATTO : totalAtto;
     const approveCalldata = erc20Iface.encodeFunctionData("approve", [VAULT_ADDRESS, approveAmount]);
     const approveHash = await sendTx(walletProvider, userAddress, ANT_TOKEN_ADDRESS, approveCalldata, "approve ANT spend in your wallet");
-    setEtchStatus(`Waiting for approve confirmation (${approveHash.slice(0, 10)}…)`, "warn");
+    setStatus(`Waiting for approve confirmation (${approveHash.slice(0, 10)}…)`, "warn");
     const approveReceipt = await rpc.waitForTransaction(approveHash);
     if (approveReceipt?.status !== 1) throw new Error(`ANT approve reverted (${approveHash})`);
   }
 
   checkCancelled();
-  setEtchStatus("Sign payment in your wallet…", "warn");
+  setStatus("Sign payment in your wallet…", "warn");
   const ensureHex = (s: string) => (s.startsWith("0x") || s.startsWith("0X") ? s : "0x" + s);
   const vaultPayments = prepared.payments.map((p) => [
     ensureHex(p.rewards_address),
@@ -1569,11 +1606,11 @@ async function uploadPublicBytes(data: Uint8Array, title: string): Promise<Publi
   // Past-the-point-of-no-return: payment is broadcast, can't unpay.
   if (etchCancel) etchCancel.afterPay = true;
   setCancelVisible(false);
-  setEtchStatus(`Waiting for payment confirmation (${payHash.slice(0, 10)}…)`, "warn");
+  setStatus(`Waiting for payment confirmation (${payHash.slice(0, 10)}…)`, "warn");
   const payReceipt = await rpc.waitForTransaction(payHash);
   if (payReceipt?.status !== 1) throw new Error(`payForQuotes reverted (${payHash})`);
 
-  setEtchStatus("Finalizing upload — pushing chunks to network…", "warn");
+  setStatus("Finalizing upload — pushing chunks to network…", "warn");
   return await finalizePublic(prepared.upload_id, prepared.payments, payHash, title);
 }
 
@@ -2349,6 +2386,65 @@ function initSettingsUI(): void {
     pwStrengthEl.className = "status" + (s.cls ? ` ${s.cls}` : "");
   });
 
+  $("generatePassphraseBtn").addEventListener("click", () => {
+    const phrase = generatePassphrase(6);
+    pwInput.type = "text";
+    pwConfirmInput.type = "text";
+    pwInput.value = phrase;
+    pwConfirmInput.value = phrase;
+    pwInput.dispatchEvent(new Event("input"));
+
+    // Inline reveal panel — the whole point of generating it is that the
+    // user has to write it down before it goes back into a password field.
+    let panel = document.getElementById("backupPassphraseReveal");
+    if (panel) panel.remove();
+    panel = document.createElement("div");
+    panel.id = "backupPassphraseReveal";
+    panel.className = "fetch-result";
+    panel.style.marginTop = "10px";
+
+    const title = document.createElement("div");
+    title.className = "fetch-meta";
+    title.style.color = "var(--copper)";
+    title.textContent = "Generated passphrase — write it down before you submit";
+    panel.appendChild(title);
+
+    const code = document.createElement("div");
+    code.style.fontFamily = "ui-monospace, Menlo, Consolas, monospace";
+    code.style.fontSize = "13px";
+    code.style.wordBreak = "break-all";
+    code.style.padding = "10px 12px";
+    code.style.background = "var(--ink)";
+    code.style.borderRadius = "4px";
+    code.style.margin = "8px 0";
+    code.textContent = phrase;
+    panel.appendChild(code);
+
+    const actions = document.createElement("div");
+    actions.style.display = "flex";
+    actions.style.gap = "8px";
+    actions.style.alignItems = "center";
+
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "outlined";
+    copyBtn.textContent = "Copy";
+    copyBtn.onclick = () => { navigator.clipboard.writeText(phrase); copyBtn.textContent = "Copied"; };
+    actions.appendChild(copyBtn);
+
+    const hideBtn = document.createElement("button");
+    hideBtn.className = "outlined";
+    hideBtn.textContent = "Hide";
+    hideBtn.onclick = () => {
+      pwInput.type = "password";
+      pwConfirmInput.type = "password";
+      panel.remove();
+    };
+    actions.appendChild(hideBtn);
+
+    panel.appendChild(actions);
+    pwConfirmInput.parentElement?.insertBefore(panel, pwConfirmInput.nextSibling);
+  });
+
   // Validates the password fields and saved-confirmation checkbox; on
   // success returns {plaintext, entries, encrypted} ready to be either
   // etched or saved to disk. Sets status on failure and returns null.
@@ -2391,7 +2487,7 @@ function initSettingsUI(): void {
       const prep = await prepareBackupBlob();
       if (!prep) return;
       setBackupStatus(`Etching ${formatSize(prep.encrypted.length)} backup…`, "warn");
-      const result = await uploadPublicBytes(prep.encrypted, "Backup");
+      const result = await uploadPublicBytes(prep.encrypted, "Backup", setBackupStatus);
       setBackupStatus("Done.", "ok");
       showBackupResultPanel(result.address, prep.entries);
       clearBackupForm();
