@@ -2342,8 +2342,18 @@ class MainActivity : AppCompatActivity() {
             setTextColor(BONE)
         })
 
+        val generateBtn = android.widget.Button(this).apply {
+            text = "Generate strong passphrase"
+            val mt = (12 * dp).toInt()
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = mt }
+        }
+        layout.addView(generateBtn)
+
         val passwordInput = EditText(this).apply {
-            hint = "Password"
+            hint = "Password (or generated passphrase)"
             inputType = android.text.InputType.TYPE_CLASS_TEXT or
                 android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             setTextColor(BONE)
@@ -2378,6 +2388,68 @@ class MainActivity : AppCompatActivity() {
             ).apply { topMargin = mt }
         }
         layout.addView(confirmInput)
+
+        // Reveal panel — only added once a passphrase is generated.
+        val revealLabel = TextView(this).apply {
+            text = ""
+            setTextColor(COPPER_BRIGHT)
+            textSize = 12f
+            val mt = (12 * dp).toInt()
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = mt }
+            visibility = View.GONE
+        }
+        val revealText = TextView(this).apply {
+            text = ""
+            setTextColor(BONE)
+            textSize = 14f
+            typeface = android.graphics.Typeface.MONOSPACE
+            val padIn = (10 * dp).toInt()
+            setPadding(padIn, padIn, padIn, padIn)
+            setBackgroundColor(0xFF0A0A0A.toInt())
+            val mt = (6 * dp).toInt()
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = mt }
+            visibility = View.GONE
+        }
+        val revealHint = TextView(this).apply {
+            text = "Write this down — there is no recovery if lost."
+            setTextColor(ASH)
+            textSize = 11f
+            val mt = (4 * dp).toInt()
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = mt }
+            visibility = View.GONE
+        }
+        layout.addView(revealLabel)
+        layout.addView(revealText)
+        layout.addView(revealHint)
+
+        generateBtn.setOnClickListener {
+            val phrase = BackupPassphrase.generate(6)
+            // Drop the password-mask so the user can read what we generated.
+            passwordInput.inputType = android.text.InputType.TYPE_CLASS_TEXT
+            confirmInput.inputType = android.text.InputType.TYPE_CLASS_TEXT
+            passwordInput.setText(phrase)
+            confirmInput.setText(phrase)
+            revealLabel.text = "Generated passphrase — write it down before you tap Encrypt"
+            revealText.text = phrase
+            revealLabel.visibility = View.VISIBLE
+            revealText.visibility = View.VISIBLE
+            revealHint.visibility = View.VISIBLE
+            // Tap-to-copy on the displayed phrase.
+            revealText.setOnClickListener {
+                val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("etchit backup passphrase", phrase))
+                Snackbar.make(binding.root, "Passphrase copied", Snackbar.LENGTH_SHORT).show()
+            }
+        }
 
         AlertDialog.Builder(this)
             .setTitle("Backup private etches")
