@@ -358,6 +358,12 @@ async function ensureWalletConnected(): Promise<{ wallet: string; provider: Eip1
 
 async function signAndDerive(message: string, info: Uint8Array, label: string): Promise<Uint8Array> {
   const { wallet, provider } = await ensureWalletConnected();
+  // AppKit routes provider.request() to its configured network (eip155:42161).
+  // If the wallet's active session is on a different chain, AppKit rejects the
+  // request with "Missing or invalid. request() chainId: eip155:42161" before
+  // it ever reaches the wallet. Switch the chain first to bring the session
+  // namespace in line — same pattern as sendTx().
+  await ensureArbitrumChain(provider);
   const messageHex = "0x" + bytesToHex(new TextEncoder().encode(message));
   // Raw EIP-1193 personal_sign — ethers BrowserProvider multiplexes extra
   // chain/accounts queries that have triggered "Invalid Id" on MetaMask
