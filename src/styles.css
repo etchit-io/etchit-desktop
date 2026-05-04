@@ -90,6 +90,35 @@ input[type=text]:focus, input[type=password]:focus {
   border-color: var(--copper);
 }
 
+.passphrase-entry {
+  margin: 14px 0;
+}
+.passphrase-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.passphrase-row input.passphrase-box {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  padding: 10px 8px;
+}
+.passphrase-row .passphrase-sep {
+  color: var(--ash);
+  user-select: none;
+  flex: 0 0 auto;
+}
+.passphrase-toggle {
+  color: var(--copper);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  display: inline-block;
+  margin-bottom: 4px;
+}
+
 button {
   padding: 10px 18px;
   background: var(--copper);

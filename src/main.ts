@@ -466,6 +466,111 @@ function setStatus(id: string, msg: string, cls: string = ""): void {
   el.className = "status " + cls;
 }
 
+// 6-word passphrase entry: 1 row of 6 boxes with em-dash separators, plus a
+// "Use a custom password instead" toggle for users who used a non-diceware password.
+// Returns getValue() (joins with '-' to match the generator's output format) and clear().
+function buildPassphraseEntry(parent: HTMLElement): { getValue: () => string; clear: () => void } {
+  const wrap = document.createElement("div");
+  wrap.className = "passphrase-entry";
+  parent.appendChild(wrap);
+
+  const row = document.createElement("div");
+  row.className = "passphrase-row";
+  wrap.appendChild(row);
+
+  const boxes: HTMLInputElement[] = [];
+  for (let i = 0; i < 6; i++) {
+    if (i > 0) {
+      const sep = document.createElement("span");
+      sep.className = "passphrase-sep";
+      sep.textContent = "—";
+      row.appendChild(sep);
+    }
+    const box = document.createElement("input");
+    box.type = "text";
+    box.className = "passphrase-box";
+    box.placeholder = String(i + 1);
+    box.autocomplete = "off";
+    box.spellcheck = false;
+    box.setAttribute("autocapitalize", "off");
+    box.setAttribute("autocorrect", "off");
+    row.appendChild(box);
+    boxes.push(box);
+  }
+
+  for (let i = 0; i < boxes.length; i++) {
+    const box = boxes[i];
+    box.addEventListener("input", () => {
+      const v = box.value;
+      if (/[\s\-—]/.test(v)) {
+        const parts = v.split(/[\s\-—]+/).filter((p) => p.length > 0);
+        if (parts.length >= 2) {
+          for (let j = 0; j < parts.length && i + j < boxes.length; j++) {
+            boxes[i + j].value = parts[j].toLowerCase();
+          }
+          const next = Math.min(i + parts.length, boxes.length - 1);
+          boxes[next].focus();
+        } else {
+          box.value = (parts[0] ?? "").toLowerCase();
+          if (i < boxes.length - 1) boxes[i + 1].focus();
+        }
+      }
+    });
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Backspace" && box.value.length === 0 && i > 0) {
+        e.preventDefault();
+        const prev = boxes[i - 1];
+        prev.focus();
+        prev.setSelectionRange(prev.value.length, prev.value.length);
+      } else if (e.key === "Enter" && i < boxes.length - 1) {
+        e.preventDefault();
+        boxes[i + 1].focus();
+      }
+    });
+  }
+
+  const customInput = document.createElement("input");
+  customInput.type = "password";
+  customInput.placeholder = "Custom password";
+  customInput.autocomplete = "off";
+  customInput.style.display = "none";
+  customInput.style.marginBottom = "12px";
+  wrap.appendChild(customInput);
+
+  let customMode = false;
+  const link = document.createElement("a");
+  link.className = "passphrase-toggle";
+  link.textContent = "Use a custom password instead";
+  link.href = "#";
+  link.onclick = (e) => {
+    e.preventDefault();
+    customMode = !customMode;
+    if (customMode) {
+      row.style.display = "none";
+      customInput.style.display = "block";
+      customInput.focus();
+      link.textContent = "Use the 6-word passphrase instead";
+    } else {
+      row.style.display = "";
+      customInput.style.display = "none";
+      boxes[0].focus();
+      link.textContent = "Use a custom password instead";
+    }
+  };
+  wrap.appendChild(link);
+
+  return {
+    getValue: () => {
+      if (customMode) return customInput.value;
+      return boxes.map((b) => b.value.trim().toLowerCase()).join("-");
+    },
+    clear: () => {
+      for (const b of boxes) b.value = "";
+      customInput.value = "";
+    },
+  };
+}
+
 function render(entries: ChainmarkEntry[]): void {
   const root = $("results");
   root.innerHTML = "";
@@ -682,7 +787,7 @@ $("connect").addEventListener("click", async () => {
     await runDecode(wallet, key);
   } catch (e) {
     const msg = (e as Error)?.message || String(e) || "(no error message)";
-    console.error("Open chain/it failed:", e);
+    console.error("Sync chainmarks failed:", e);
     setStatus("connectStatus", `Failed: ${msg}`, "err");
   } finally {
     btn.disabled = false;
@@ -997,16 +1102,10 @@ function renderBackupDecryptForm(parent: HTMLElement, bytes: Uint8Array): void {
   note.className = "fetch-meta";
   note.style.color = "var(--ash)";
   note.style.marginBottom = "8px";
-  note.textContent = "Encrypted etchit backup. Enter the password to decrypt and import the private etches into this device.";
+  note.textContent = "Encrypted etchit backup. Enter the 6-word recovery passphrase to decrypt and import the private etches into this device.";
   parent.appendChild(note);
 
-  const pwInput = document.createElement("input");
-  pwInput.type = "password";
-  pwInput.placeholder = "Backup password";
-  pwInput.autocomplete = "off";
-  pwInput.style.width = "100%";
-  pwInput.style.marginBottom = "8px";
-  parent.appendChild(pwInput);
+  const passphrase = buildPassphraseEntry(parent);
 
   const status = document.createElement("div");
   status.className = "status";
@@ -1022,16 +1121,17 @@ function renderBackupDecryptForm(parent: HTMLElement, bytes: Uint8Array): void {
   decryptBtn.className = "outlined";
   decryptBtn.textContent = "Decrypt and import";
   decryptBtn.onclick = async () => {
-    if (!pwInput.value) { setLocalStatus("Password is required.", "err"); return; }
+    const pw = passphrase.getValue();
+    if (!pw) { setLocalStatus("Passphrase is required.", "err"); return; }
     decryptBtn.disabled = true;
     try {
       setLocalStatus("Decrypting…", "warn");
-      const plaintext = await backupDecrypt(bytes, pwInput.value);
-      if (!plaintext) { setLocalStatus("Decrypt failed — wrong password or corrupted backup.", "err"); decryptBtn.disabled = false; return; }
+      const plaintext = await backupDecrypt(bytes, pw);
+      if (!plaintext) { setLocalStatus("Decrypt failed — wrong passphrase or corrupted backup.", "err"); decryptBtn.disabled = false; return; }
       setLocalStatus("Importing…", "warn");
       const { imported, skipped } = await importBackupPlaintext(plaintext);
       setLocalStatus(`Restored ${imported} new entr${imported === 1 ? "y" : "ies"}${skipped ? ` (skipped ${skipped} duplicate${skipped === 1 ? "" : "s"})` : ""}.`, "ok");
-      pwInput.value = "";
+      passphrase.clear();
     } catch (e) {
       setLocalStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
       decryptBtn.disabled = false;
@@ -2525,6 +2625,7 @@ function initSettingsUI(): void {
   });
 
   // Restore private etches from a backup address
+  const restorePassphrase = buildPassphraseEntry($("restorePassphraseSlot"));
   const setRestoreStatus = (msg: string, cls: "ok" | "err" | "warn" | "" = "") => {
     const el = $("restoreStatus");
     el.textContent = msg;
@@ -2538,19 +2639,19 @@ function initSettingsUI(): void {
     setRestoreStatus("Decrypting…", "warn");
     const plaintext = await backupDecrypt(bytes, pw);
     if (!plaintext) {
-      setRestoreStatus("Decrypt failed — wrong password or corrupted backup.", "err"); return;
+      setRestoreStatus("Decrypt failed — wrong passphrase or corrupted backup.", "err"); return;
     }
     setRestoreStatus("Importing into local private store…", "warn");
     const { imported, skipped } = await importBackupPlaintext(plaintext);
     setRestoreStatus(`Restored ${imported} new entr${imported === 1 ? "y" : "ies"}${skipped ? ` (skipped ${skipped} duplicate${skipped === 1 ? "" : "s"})` : ""}.`, "ok");
-    $<HTMLInputElement>("restorePassword").value = "";
+    restorePassphrase.clear();
   }
 
   $("restoreBackupBtn").addEventListener("click", async () => {
     const addrRaw = $<HTMLInputElement>("restoreAddr").value.trim().toLowerCase().replace(/^0x/, "");
-    const pw = $<HTMLInputElement>("restorePassword").value;
+    const pw = restorePassphrase.getValue();
     if (!/^[0-9a-f]{64}$/.test(addrRaw)) { setRestoreStatus("Invalid address (need 64 hex chars).", "err"); return; }
-    if (!pw) { setRestoreStatus("Password is required.", "err"); return; }
+    if (!pw) { setRestoreStatus("Passphrase is required.", "err"); return; }
     if (!inTauri) { setRestoreStatus("Restore from network requires the desktop app (no FFI in plain browser).", "err"); return; }
 
     const btn = $<HTMLButtonElement>("restoreBackupBtn");
@@ -2586,8 +2687,8 @@ function initSettingsUI(): void {
     restoreBtn.textContent = "Restore from file";
     restoreBtn.onclick = async () => {
       if (!pendingRestoreFile) { setRestoreStatus("No file selected.", "err"); return; }
-      const pw = $<HTMLInputElement>("restorePassword").value;
-      if (!pw) { setRestoreStatus("Password is required.", "err"); return; }
+      const pw = restorePassphrase.getValue();
+      if (!pw) { setRestoreStatus("Passphrase is required.", "err"); return; }
       restoreBtn.disabled = true;
       try {
         setRestoreStatus("Reading file…", "warn");
