@@ -1,28 +1,28 @@
-package com.autonomi.antpaste.library
+package com.autonomi.antpaste.chainmark
 
 import android.util.Log
 import com.autonomi.antpaste.wallet.WalletSigner
 
-// Coordinates the v1 library state machine: set up (derive key) → restore from
+// Coordinates the v1 chainmark state machine: set up (derive key) → restore from
 // chain (fetch + decrypt + replay) → add/hide (single-entry self-tx) → forget.
-// Stateless beyond the cached replayed map; no persistence beyond LibraryKeyManager.
-class LibraryController(
-    private val keyManager: LibraryKeyManager,
+// Stateless beyond the cached replayed map; no persistence beyond ChainmarkKeyManager.
+class ChainmarkController(
+    private val keyManager: ChainmarkKeyManager,
     private val indexer: IndexerClient,
     private val walletSigner: WalletSigner,
 ) {
 
-    private val sync = LibrarySync(keyManager, walletSigner)
+    private val sync = ChainmarkSync(keyManager, walletSigner)
 
     @Volatile
-    private var entries: Map<String, LibraryEntry> = emptyMap()
+    private var entries: Map<String, ChainmarkEntry> = emptyMap()
 
     @Volatile
     private var entriesLoadedFor: String? = null
 
     // Returns the in-memory replay state, but only if it was loaded for [walletAddress].
     // After a wallet switch, callers see an empty map until restoreFromChain runs again.
-    fun entriesFor(walletAddress: String): Map<String, LibraryEntry> =
+    fun entriesFor(walletAddress: String): Map<String, ChainmarkEntry> =
         if (entriesLoadedFor == walletAddress.lowercase()) entries else emptyMap()
 
     fun isSetUp(walletAddress: String): Boolean =
@@ -32,15 +32,15 @@ class LibraryController(
         keyManager.deriveAndCache(chainId, walletAddress)
     }
 
-    suspend fun restoreFromChain(walletAddress: String): Map<String, LibraryEntry> {
+    suspend fun restoreFromChain(walletAddress: String): Map<String, ChainmarkEntry> {
         val key = keyManager.getCachedKey(walletAddress)
-            ?: throw IllegalStateException("library not set up for $walletAddress")
+            ?: throw IllegalStateException("chain/it not set up for $walletAddress")
         Log.i(TAG, "restoreFromChain: wallet=$walletAddress")
-        val txs = indexer.listLibraryTxs(walletAddress)
+        val txs = indexer.listChainmarkTxs(walletAddress)
         Log.i(TAG, "restoreFromChain: indexer returned ${txs.size} candidate tx(s)")
         var decrypted = 0
         val events = txs.mapNotNull { tx ->
-            val plaintext = LibraryCrypto.open(key, tx.calldata)
+            val plaintext = ChainmarkCrypto.open(key, tx.calldata)
             if (plaintext == null) {
                 Log.w(TAG, "restoreFromChain: AEAD reject hash=${tx.hash}")
                 null
@@ -49,7 +49,7 @@ class LibraryController(
                 TxEvent(tx.blockNum, tx.txIndex, String(plaintext, Charsets.UTF_8))
             }
         }
-        val state = LibraryReplay.apply(events)
+        val state = ChainmarkReplay.apply(events)
         Log.i(TAG, "restoreFromChain: decrypted=$decrypted → ${state.size} entr${if (state.size == 1) "y" else "ies"}")
         entries = state
         entriesLoadedFor = walletAddress.lowercase()
@@ -83,7 +83,7 @@ class LibraryController(
                 action = action,
             )
         }
-        return LibrarySync.planBatches(wire).map { batch -> sync.sendBatch(chainId, walletAddress, batch) }
+        return ChainmarkSync.planBatches(wire).map { batch -> sync.sendBatch(chainId, walletAddress, batch) }
     }
 
     suspend fun addByAddress(
@@ -141,12 +141,12 @@ class LibraryController(
 
         // Pure: decrypt-and-replay over an indexer's tx list. Skips txs whose
         // calldata fails AEAD verification (unrelated self-txs / wrong wallet).
-        fun replayDecryptedTxs(key: ByteArray, txs: List<IndexedTx>): Map<String, LibraryEntry> {
+        fun replayDecryptedTxs(key: ByteArray, txs: List<IndexedTx>): Map<String, ChainmarkEntry> {
             val events = txs.mapNotNull { tx ->
-                val plaintext = LibraryCrypto.open(key, tx.calldata) ?: return@mapNotNull null
+                val plaintext = ChainmarkCrypto.open(key, tx.calldata) ?: return@mapNotNull null
                 TxEvent(tx.blockNum, tx.txIndex, String(plaintext, Charsets.UTF_8))
             }
-            return LibraryReplay.apply(events)
+            return ChainmarkReplay.apply(events)
         }
     }
 }

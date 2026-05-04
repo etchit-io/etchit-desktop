@@ -1,4 +1,4 @@
-package com.autonomi.antpaste.library
+package com.autonomi.antpaste.chainmark
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -9,9 +9,9 @@ import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-// Implements §4–§8 of docs/library-format-v1.md. Pure JVM, no Android deps —
+// Implements §4–§8 of docs/chainmark-format-v1.md. Pure JVM, no Android deps —
 // must round-trip byte-identically against any other v1-conformant client.
-object LibraryCrypto {
+object ChainmarkCrypto {
 
     const val VERSION_BYTE: Byte = 0x01
     const val NONCE_LEN = 12
@@ -21,11 +21,11 @@ object LibraryCrypto {
 
     val BUCKETS = intArrayOf(1024, 4096, 16384)
 
-    private const val RECIPIENT_PREFIX = "etchit-library-v1/recipient"
+    private const val RECIPIENT_PREFIX = "etchit-chainmark-v1/recipient"
 
     private const val GCM_TAG_BITS = 128
     private const val FRAME_LEN_FIELD = 4
-    private const val INFO = "etchit-library/v1/aead-key"
+    private const val INFO = "etchit-chainmark/v1/aead-key"
 
     fun deriveKey(ikm: ByteArray): ByteArray {
         require(ikm.size == IKM_LEN) { "IKM must be $IKM_LEN bytes (r||s of personal_sign signature)" }
@@ -82,9 +82,9 @@ object LibraryCrypto {
         return frame.copyOfRange(FRAME_LEN_FIELD, FRAME_LEN_FIELD + payloadLen)
     }
 
-    // Per-tx recipient: SHA-256("etchit-library-v1/recipient" || nonce)[12:32].
+    // Per-tx recipient: SHA-256("etchit-chainmark-v1/recipient" || nonce)[12:32].
     // Fresh address per tx (nonce is CSPRNG-random) so chain observers cannot
-    // enumerate library activity via a single `to == X` filter. Provably
+    // enumerate chainmark activity via a single `to == X` filter. Provably
     // unowned (2^-160 collision with any keccak-derived EOA address).
     fun recipientForNonce(nonce: ByteArray): String {
         require(nonce.size == NONCE_LEN) { "nonce must be $NONCE_LEN bytes" }

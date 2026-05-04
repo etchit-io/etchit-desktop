@@ -1,4 +1,4 @@
-package com.autonomi.antpaste.library
+package com.autonomi.antpaste.chainmark
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -13,13 +13,13 @@ class ArbiscanIndexer(
     private val apiKey: String? = null,
 ) : IndexerClient {
 
-    override suspend fun listLibraryTxs(walletAddress: String): List<IndexedTx> = withContext(Dispatchers.IO) {
+    override suspend fun listChainmarkTxs(walletAddress: String): List<IndexedTx> = withContext(Dispatchers.IO) {
         val url = buildUrl(walletAddress)
         Log.i("ant-paste", "indexer GET ${url.replace(Regex("apikey=[^&]+"), "apikey=…")}")
         val raw = httpGet(url)
         Log.i("ant-paste", "indexer raw response: ${raw.length} bytes")
-        val out = parseLibraryTxs(raw, walletAddress)
-        Log.i("ant-paste", "indexer parsed: ${out.size} library tx(s) match recipient-derivation")
+        val out = parseChainmarkTxs(raw, walletAddress)
+        Log.i("ant-paste", "indexer parsed: ${out.size} chainmark tx(s) match recipient-derivation")
         if (out.isEmpty() && raw.contains("\"result\":[")) {
             // Diagnose: count how many txs the response had at all so we can tell
             // "indexer empty" from "all txs filtered out".
@@ -84,7 +84,7 @@ class ArbiscanIndexer(
         // Pure: callable from tests with hand-authored Arbiscan responses.
         // Recipient verification: a tx is ours iff `to == recipientForBlob(input)` —
         // this is the spec-conformance check that AEAD then confirms.
-        internal fun parseLibraryTxs(rawJson: String, walletAddress: String): List<IndexedTx> {
+        internal fun parseChainmarkTxs(rawJson: String, walletAddress: String): List<IndexedTx> {
             val from = walletAddress.lowercase()
             val root = try { JSONObject(rawJson) } catch (_: Exception) { return emptyList() }
             val arr = root.optJSONArray("result") ?: return emptyList()
@@ -96,9 +96,9 @@ class ArbiscanIndexer(
                 val input = tx.optString("input", "")
                 if (input.isBlank() || input == "0x") continue
                 val calldata = try { Hex.decode(input) } catch (_: Exception) { continue }
-                if (calldata.size < 2 + LibraryCrypto.NONCE_LEN + LibraryCrypto.TAG_LEN) continue
-                if (calldata[0] != LibraryCrypto.VERSION_BYTE) continue
-                val expectedTo = try { LibraryCrypto.recipientForBlob(calldata) } catch (_: Exception) { continue }
+                if (calldata.size < 2 + ChainmarkCrypto.NONCE_LEN + ChainmarkCrypto.TAG_LEN) continue
+                if (calldata[0] != ChainmarkCrypto.VERSION_BYTE) continue
+                val expectedTo = try { ChainmarkCrypto.recipientForBlob(calldata) } catch (_: Exception) { continue }
                 if (tx.optString("to").lowercase() != expectedTo.lowercase()) continue
                 val blockNum = tx.optString("blockNumber").toLongOrNull() ?: continue
                 val txIndex = tx.optString("transactionIndex").toIntOrNull() ?: continue

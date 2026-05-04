@@ -42,11 +42,11 @@ import androidx.lifecycle.lifecycleScope
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.autonomi.antpaste.databinding.ActivityMainBinding
-import com.autonomi.antpaste.library.ArbiscanIndexer
-import com.autonomi.antpaste.library.LibraryController
-import com.autonomi.antpaste.library.LibraryEntry
-import com.autonomi.antpaste.library.LibraryKeyManager
-import com.autonomi.antpaste.library.WireEntry
+import com.autonomi.antpaste.chainmark.ArbiscanIndexer
+import com.autonomi.antpaste.chainmark.ChainmarkController
+import com.autonomi.antpaste.chainmark.ChainmarkEntry
+import com.autonomi.antpaste.chainmark.ChainmarkKeyManager
+import com.autonomi.antpaste.chainmark.WireEntry
 import com.autonomi.antpaste.net.ConnectionManager
 import com.autonomi.antpaste.net.ProgressTail
 import com.autonomi.antpaste.ui.WalletModalHost
@@ -142,7 +142,7 @@ class MainActivity : AppCompatActivity() {
     private var storeJob: Job? = null
     private lateinit var etchHistory: EtchHistory
     private lateinit var privateDataStore: PrivateDataStore
-    private lateinit var libraryController: LibraryController
+    private lateinit var chainmarkController: ChainmarkController
     private lateinit var opHelper: OperationHelper
     private var networkInfoJob: Job? = null
     private var progressTailJob: Job? = null
@@ -321,14 +321,14 @@ class MainActivity : AppCompatActivity() {
 
         etchHistory = EtchHistory(prefs)
         privateDataStore = PrivateDataStore(encryptedPrefs)
-        val walletSignerForLibrary = (application as EtchitApplication).walletSigner
-        libraryController = LibraryController(
-            keyManager = LibraryKeyManager(encryptedPrefs, walletSignerForLibrary),
+        val walletSignerForChainmark = (application as EtchitApplication).walletSigner
+        chainmarkController = ChainmarkController(
+            keyManager = ChainmarkKeyManager(encryptedPrefs, walletSignerForChainmark),
             indexer = ArbiscanIndexer(
-                baseUrl = prefs.getString("library_indexer_url", null)?.takeIf { it.isNotBlank() } ?: ArbiscanIndexer.DEFAULT_BASE_URL,
-                apiKey = prefs.getString("library_indexer_api_key", null)?.takeIf { it.isNotBlank() },
+                baseUrl = prefs.getString("chainmark_indexer_url", null)?.takeIf { it.isNotBlank() } ?: ArbiscanIndexer.DEFAULT_BASE_URL,
+                apiKey = prefs.getString("chainmark_indexer_api_key", null)?.takeIf { it.isNotBlank() },
             ),
-            walletSigner = walletSignerForLibrary,
+            walletSigner = walletSignerForChainmark,
         )
         opHelper = OperationHelper(this)
 
@@ -1382,10 +1382,10 @@ class MainActivity : AppCompatActivity() {
             openPrivateEtches()
         }
 
-        view.findViewById<View>(R.id.libraryBtn).setOnClickListener {
+        view.findViewById<View>(R.id.chainmarkBtn).setOnClickListener {
             hapticTick()
             dialog.dismiss()
-            showLibraryScreen()
+            showChainmarkScreen()
         }
 
         view.findViewById<View>(R.id.viewTermsBtn).setOnClickListener {
@@ -1540,21 +1540,21 @@ class MainActivity : AppCompatActivity() {
 
         row.setOnLongClickListener {
             val session = walletSession.state.value as? SessionState.Connected
-            val canAddToLibrary = !entry.isPrivate &&
+            val canAddToChainmarks = !entry.isPrivate &&
                 session != null &&
-                libraryController.isSetUp(session.address)
+                chainmarkController.isSetUp(session.address)
 
             val actions = mutableListOf<Pair<String, () -> Unit>>()
-            if (canAddToLibrary) {
-                actions += "Add to library" to {
+            if (canAddToChainmarks) {
+                actions += "Add to chainmarks" to {
                     val s = session!!
                     lifecycleScope.launch {
                         try {
                             // History rows are demonstrably the user's own etches → action = add.
-                            val txHash = libraryController.addByAddress(s.chainId, s.address, entry.address, entry.title, WireEntry.ACTION_ADD)
-                            showStatus("Added to library: ${txHash.take(10)}…")
+                            val txHash = chainmarkController.addByAddress(s.chainId, s.address, entry.address, entry.title, WireEntry.ACTION_ADD)
+                            showStatus("Added to chainmarks: ${txHash.take(10)}…")
                         } catch (e: Exception) {
-                            showStatus("Add to library failed: ${e.message}", isError = true)
+                            showStatus("Add to chainmarks failed: ${e.message}", isError = true)
                         }
                     }
                 }
@@ -1733,9 +1733,9 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    // ── Library (cross-device etch sync) ──────────────────────────
+    // ── chain/it (chainmarks) ───────────────────────────────────────
 
-    private fun showLibraryScreen() {
+    private fun showChainmarkScreen() {
         val dialog = BottomSheetDialog(this, R.style.SheetDialog)
         val dp = resources.displayMetrics.density
         val pad = (24 * dp).toInt()
@@ -1798,7 +1798,7 @@ class MainActivity : AppCompatActivity() {
         lateinit var render: () -> Unit
         render = {
             container.removeAllViews()
-            container.addView(heading("Library"))
+            container.addView(heading("chain/it"))
             container.addView(muted(
                 "An encrypted on-chain index of your public etches. Off until you set it up. " +
                 "Costs ~\$0.02–\$0.10 in ETH gas per sync. See README for the full privacy model."
@@ -1807,17 +1807,17 @@ class MainActivity : AppCompatActivity() {
             val session = walletSession.state.value
             when {
                 session !is SessionState.Connected -> {
-                    container.addView(muted("Connect a wallet first to use the library.", bottomMarginDp = 0))
+                    container.addView(muted("Connect a wallet first to use chain/it.", bottomMarginDp = 0))
                 }
-                !libraryController.isSetUp(session.address) -> {
+                !chainmarkController.isSetUp(session.address) -> {
                     container.addView(muted(
-                        "Setting up requires one signature to derive your library encryption key. " +
+                        "Setting up requires one signature to derive your chainmark encryption key. " +
                         "This signature does NOT authorize any transaction.", bottomMarginDp = 8))
-                    container.addView(primaryButton("Set up library") {
+                    container.addView(primaryButton("Set up chain/it") {
                         lifecycleScope.launch {
                             try {
-                                libraryController.setUp(session.chainId, session.address)
-                                showStatus("Library set up.")
+                                chainmarkController.setUp(session.chainId, session.address)
+                                showStatus("chain/it set up.")
                                 render()
                             } catch (e: Exception) {
                                 showStatus("Setup failed: ${e.message}", isError = true)
@@ -1829,7 +1829,7 @@ class MainActivity : AppCompatActivity() {
                     val wallet = session.address
                     val chainId = session.chainId
 
-                    val visible = libraryController.entriesFor(wallet).values
+                    val visible = chainmarkController.entriesFor(wallet).values
                         .filterNot { it.isHidden }
                         .sortedByDescending { it.ts }
 
@@ -1842,7 +1842,7 @@ class MainActivity : AppCompatActivity() {
                         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
                         val df = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault())
                         for (e in visible) {
-                            list.addView(libraryEntryRow(e, df, dialog) { render() })
+                            list.addView(chainmarkEntryRow(e, df, dialog) { render() })
                         }
                         container.addView(list)
                     }
@@ -1850,9 +1850,9 @@ class MainActivity : AppCompatActivity() {
                     container.addView(primaryButton("Restore from chain", topMarginDp = 16) {
                         lifecycleScope.launch {
                             try {
-                                showStatus("Fetching library…")
-                                libraryController.restoreFromChain(wallet)
-                                showStatus("Library updated.")
+                                showStatus("Fetching chainmarks…")
+                                chainmarkController.restoreFromChain(wallet)
+                                showStatus("Chainmarks updated.")
                                 render()
                             } catch (e: Exception) {
                                 showStatus("Restore failed: ${e.message}", isError = true)
@@ -1864,7 +1864,7 @@ class MainActivity : AppCompatActivity() {
                         promptAddByAddress { addr, title ->
                             lifecycleScope.launch {
                                 try {
-                                    val txHash = libraryController.addByAddress(chainId, wallet, addr, title, WireEntry.ACTION_ADD)
+                                    val txHash = chainmarkController.addByAddress(chainId, wallet, addr, title, WireEntry.ACTION_ADD)
                                     showStatus("Synced: ${txHash.take(10)}…")
                                     render()
                                 } catch (e: Exception) {
@@ -1882,25 +1882,25 @@ class MainActivity : AppCompatActivity() {
                         bulkAddByAddressDialog(chainId, wallet) { render() }
                     })
 
-                    container.addView(outlinedButton("Back up library key") {
-                        backupLibraryKeyWithBiometric(wallet)
+                    container.addView(outlinedButton("Back up chainmark key") {
+                        backupChainmarkKeyWithBiometric(wallet)
                     })
 
-                    container.addView(outlinedButton("Restore library key from backup") {
-                        promptRestoreLibraryKey(wallet) { render() }
+                    container.addView(outlinedButton("Restore chainmark key from backup") {
+                        promptRestoreChainmarkKey(wallet) { render() }
                     })
 
-                    container.addView(outlinedButton("Forget library on this device") {
+                    container.addView(outlinedButton("Forget chain/it on this device") {
                         AlertDialog.Builder(this)
-                            .setTitle("Forget library?")
+                            .setTitle("Forget chain/it?")
                             .setMessage(
-                                "Removes the library key from this device. Your on-chain entries remain " +
+                                "Removes the chainmark key from this device. Your on-chain entries remain " +
                                 "permanent and you can restore by setting up again with the same wallet, " +
                                 "or by pasting in a backup of the key."
                             )
                             .setPositiveButton("Forget") { _, _ ->
-                                libraryController.forget(wallet)
-                                showStatus("Library forgotten on this device.")
+                                chainmarkController.forget(wallet)
+                                showStatus("chain/it forgotten on this device.")
                                 render()
                             }
                             .setNegativeButton("Cancel", null)
@@ -1919,8 +1919,8 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun libraryEntryRow(
-        entry: LibraryEntry,
+    private fun chainmarkEntryRow(
+        entry: ChainmarkEntry,
         dateFormat: java.text.SimpleDateFormat,
         dialog: BottomSheetDialog,
         onChanged: () -> Unit,
@@ -1960,15 +1960,15 @@ class MainActivity : AppCompatActivity() {
         row.setOnLongClickListener {
             val session = walletSession.state.value as? SessionState.Connected ?: return@setOnLongClickListener true
             AlertDialog.Builder(this)
-                .setTitle("Hide from library?")
+                .setTitle("Hide from chain/it?")
                 .setMessage(
-                    "Writes a permanent tombstone to your on-chain library. The etch itself stays " +
+                    "Writes a permanent tombstone to your on-chain chainmarks. The etch itself stays " +
                     "on the network. Costs one wallet transaction."
                 )
                 .setPositiveButton("Hide") { _, _ ->
                     lifecycleScope.launch {
                         try {
-                            libraryController.hide(session.chainId, session.address, entry.addr)
+                            chainmarkController.hide(session.chainId, session.address, entry.addr)
                             (row.parent as? LinearLayout)?.removeView(row)
                             showStatus("Hide queued.")
                             onChanged()
@@ -1984,18 +1984,18 @@ class MainActivity : AppCompatActivity() {
         return row
     }
 
-    private fun backupLibraryKeyWithBiometric(walletAddress: String) {
+    private fun backupChainmarkKeyWithBiometric(walletAddress: String) {
         val authenticators = BiometricManager.Authenticators.BIOMETRIC_WEAK or
             BiometricManager.Authenticators.DEVICE_CREDENTIAL
         val canAuth = BiometricManager.from(this).canAuthenticate(authenticators)
         if (canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
-            showLibraryKeyBackup(walletAddress)
+            showChainmarkKeyBackup(walletAddress)
             return
         }
         val executor = ContextCompat.getMainExecutor(this)
         val prompt = BiometricPrompt(this, executor, object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                showLibraryKeyBackup(walletAddress)
+                showChainmarkKeyBackup(walletAddress)
             }
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                 if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
@@ -2005,16 +2005,16 @@ class MainActivity : AppCompatActivity() {
             }
         })
         prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Back up library key")
+            .setTitle("Back up chainmark key")
             .setDescription("Authenticate to reveal the 32-byte key")
             .setAllowedAuthenticators(authenticators)
             .build())
     }
 
-    private fun showLibraryKeyBackup(walletAddress: String) {
-        val key = libraryController.exportKey(walletAddress)
+    private fun showChainmarkKeyBackup(walletAddress: String) {
+        val key = chainmarkController.exportKey(walletAddress)
         if (key == null) {
-            showStatus("No library key to back up", isError = true)
+            showStatus("No chainmark key to back up", isError = true)
             return
         }
         val hex = key.joinToString("") { "%02x".format(it.toInt() and 0xff) }
@@ -2025,7 +2025,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(pad, pad, pad, pad)
         }
         layout.addView(TextView(this).apply {
-            text = "Save this in a password manager. Anyone with it can decrypt your library entries on chain. The key is bound to this wallet only."
+            text = "Save this in a password manager. Anyone with it can decrypt your chainmark entries on chain. The key is bound to this wallet only."
             setTextColor(ASH)
             textSize = 12f
             layoutParams = LinearLayout.LayoutParams(
@@ -2041,18 +2041,18 @@ class MainActivity : AppCompatActivity() {
             setTextIsSelectable(true)
         })
         AlertDialog.Builder(this)
-            .setTitle("Library key (hex)")
+            .setTitle("Chainmark key (hex)")
             .setView(layout)
             .setPositiveButton("Copy") { _, _ ->
                 val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("library key", hex))
-                showStatus("Library key copied")
+                cm.setPrimaryClip(ClipData.newPlainText("chainmark key", hex))
+                showStatus("Chainmark key copied")
             }
             .setNegativeButton("Close", null)
             .show()
     }
 
-    private fun promptRestoreLibraryKey(walletAddress: String, onDone: () -> Unit) {
+    private fun promptRestoreChainmarkKey(walletAddress: String, onDone: () -> Unit) {
         val dp = resources.displayMetrics.density
         val pad = (16 * dp).toInt()
         val layout = LinearLayout(this).apply {
@@ -2070,7 +2070,7 @@ class MainActivity : AppCompatActivity() {
         }
         layout.addView(input)
         AlertDialog.Builder(this)
-            .setTitle("Restore library key")
+            .setTitle("Restore chainmark key")
             .setView(layout)
             .setPositiveButton("Restore") { _, _ ->
                 val raw = input.text.toString().trim().removePrefix("0x")
@@ -2084,8 +2084,8 @@ class MainActivity : AppCompatActivity() {
                     return@setPositiveButton
                 }
                 try {
-                    libraryController.importKey(walletAddress, bytes)
-                    showStatus("Library key restored. Tap Restore from chain.")
+                    chainmarkController.importKey(walletAddress, bytes)
+                    showStatus("Chainmark key restored. Tap Restore from chain.")
                     onDone()
                 } catch (e: Exception) {
                     showStatus("Restore failed: ${e.message}", isError = true)
@@ -2202,7 +2202,7 @@ class MainActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 try {
                     showStatus("Sending ${selected.size} entries…")
-                    val txHashes = libraryController.addMultiple(chainId, walletAddress, selected, WireEntry.ACTION_ADD)
+                    val txHashes = chainmarkController.addMultiple(chainId, walletAddress, selected, WireEntry.ACTION_ADD)
                     val plural = if (txHashes.size > 1) "${txHashes.size} txs" else "1 tx"
                     showStatus("Synced ${selected.size} entries in $plural")
                     onDone()
@@ -2280,7 +2280,7 @@ class MainActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     try {
                         showStatus("Adding ${entries.size}…")
-                        val txHashes = libraryController.addMultiple(
+                        val txHashes = chainmarkController.addMultiple(
                             chainId, walletAddress, entries, WireEntry.ACTION_ADD,
                         )
                         val plural = if (txHashes.size > 1) "${txHashes.size} txs" else "1 tx"
@@ -2314,7 +2314,7 @@ class MainActivity : AppCompatActivity() {
         layout.addView(addrInput)
         layout.addView(titleInput)
         AlertDialog.Builder(this)
-            .setTitle("Add to library")
+            .setTitle("Add to chainmarks")
             .setView(layout)
             .setPositiveButton("Add") { _, _ ->
                 onSubmit(

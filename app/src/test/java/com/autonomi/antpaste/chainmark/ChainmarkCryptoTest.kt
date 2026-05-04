@@ -1,4 +1,4 @@
-package com.autonomi.antpaste.library
+package com.autonomi.antpaste.chainmark
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -6,7 +6,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-class LibraryCryptoTest {
+class ChainmarkCryptoTest {
 
     private fun hex(s: String): ByteArray {
         val clean = s.removePrefix("0x")
@@ -29,7 +29,7 @@ class LibraryCryptoTest {
             "b8a11f5c5ee1879ec3454e5f3c738d2d" +
             "9d201395faa4b61a96c8"
         )
-        val out = LibraryCrypto.hkdfSha256(ByteArray(0), ikm, ByteArray(0), 42)
+        val out = ChainmarkCrypto.hkdfSha256(ByteArray(0), ikm, ByteArray(0), 42)
         assertArrayEquals(expected, out)
     }
 
@@ -39,33 +39,33 @@ class LibraryCryptoTest {
     fun deriveKey_zeroIkm_golden() {
         val ikm = ByteArray(64)
         val expected = hex("37882090825a3866b3be864ffc59813f09ebc923f12942a1cf6b5f947dd07cc6")
-        assertArrayEquals(expected, LibraryCrypto.deriveKey(ikm))
+        assertArrayEquals(expected, ChainmarkCrypto.deriveKey(ikm))
     }
 
     @Test
     fun deriveKey_filledIkm_golden() {
         val ikm = ByteArray(64) { 0x42 }
         val expected = hex("48864d6ddde21c594b40b9fefe0192acb568d189fbd402a627540592c938dacf")
-        assertArrayEquals(expected, LibraryCrypto.deriveKey(ikm))
+        assertArrayEquals(expected, ChainmarkCrypto.deriveKey(ikm))
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun deriveKey_rejectsWrongLength() {
-        LibraryCrypto.deriveKey(ByteArray(32))
+        ChainmarkCrypto.deriveKey(ByteArray(32))
     }
 
     // ── selectBucket ──
 
     @Test
     fun selectBucket_boundaries() {
-        assertEquals(0, LibraryCrypto.selectBucket(0))
-        assertEquals(0, LibraryCrypto.selectBucket(1020))
-        assertEquals(1, LibraryCrypto.selectBucket(1021))
-        assertEquals(1, LibraryCrypto.selectBucket(4092))
-        assertEquals(2, LibraryCrypto.selectBucket(4093))
-        assertEquals(2, LibraryCrypto.selectBucket(16380))
-        assertNull(LibraryCrypto.selectBucket(16381))
-        assertNull(LibraryCrypto.selectBucket(-1))
+        assertEquals(0, ChainmarkCrypto.selectBucket(0))
+        assertEquals(0, ChainmarkCrypto.selectBucket(1020))
+        assertEquals(1, ChainmarkCrypto.selectBucket(1021))
+        assertEquals(1, ChainmarkCrypto.selectBucket(4092))
+        assertEquals(2, ChainmarkCrypto.selectBucket(4093))
+        assertEquals(2, ChainmarkCrypto.selectBucket(16380))
+        assertNull(ChainmarkCrypto.selectBucket(16381))
+        assertNull(ChainmarkCrypto.selectBucket(-1))
     }
 
     // ── seal/open round-trip ──
@@ -73,53 +73,53 @@ class LibraryCryptoTest {
     @Test
     fun sealOpen_emptyPayload() {
         val key = ByteArray(32) { 0x11 }
-        val sealed = LibraryCrypto.seal(key, ByteArray(0))
+        val sealed = ChainmarkCrypto.seal(key, ByteArray(0))
         assertNotNull(sealed)
         assertEquals(2 + 12 + 1024 + 16, sealed!!.size)
         assertEquals(0x01.toByte(), sealed[0])
         assertEquals(0x00.toByte(), sealed[1])
-        assertArrayEquals(ByteArray(0), LibraryCrypto.open(key, sealed))
+        assertArrayEquals(ByteArray(0), ChainmarkCrypto.open(key, sealed))
     }
 
     @Test
     fun sealOpen_smallPayload_roundtrip() {
         val key = ByteArray(32) { 0x22 }
         val payload = """{"v":1,"entries":[]}""".toByteArray()
-        val sealed = LibraryCrypto.seal(key, payload)!!
+        val sealed = ChainmarkCrypto.seal(key, payload)!!
         assertEquals(0x00.toByte(), sealed[1])
-        assertArrayEquals(payload, LibraryCrypto.open(key, sealed))
+        assertArrayEquals(payload, ChainmarkCrypto.open(key, sealed))
     }
 
     @Test
     fun sealOpen_4kPayload_roundtrip() {
         val key = ByteArray(32) { 0x33 }
         val payload = ByteArray(2000) { (it and 0xff).toByte() }
-        val sealed = LibraryCrypto.seal(key, payload)!!
+        val sealed = ChainmarkCrypto.seal(key, payload)!!
         assertEquals(0x01.toByte(), sealed[1])
-        assertArrayEquals(payload, LibraryCrypto.open(key, sealed))
+        assertArrayEquals(payload, ChainmarkCrypto.open(key, sealed))
     }
 
     @Test
     fun sealOpen_16kPayload_roundtrip() {
         val key = ByteArray(32) { 0x44 }
         val payload = ByteArray(16000) { ((it * 7) and 0xff).toByte() }
-        val sealed = LibraryCrypto.seal(key, payload)!!
+        val sealed = ChainmarkCrypto.seal(key, payload)!!
         assertEquals(0x02.toByte(), sealed[1])
-        assertArrayEquals(payload, LibraryCrypto.open(key, sealed))
+        assertArrayEquals(payload, ChainmarkCrypto.open(key, sealed))
     }
 
     @Test
     fun seal_rejectsOversizedPayload() {
         val key = ByteArray(32)
-        assertNull(LibraryCrypto.seal(key, ByteArray(20000)))
+        assertNull(ChainmarkCrypto.seal(key, ByteArray(20000)))
     }
 
     @Test
     fun seal_explicitNonce_deterministic_golden() {
-        val key = LibraryCrypto.deriveKey(ByteArray(64))
+        val key = ChainmarkCrypto.deriveKey(ByteArray(64))
         val nonce = ByteArray(12)
         val payload = """{"v":1,"entries":[]}""".toByteArray()
-        val sealed = LibraryCrypto.seal(key, payload, nonce)!!
+        val sealed = ChainmarkCrypto.seal(key, payload, nonce)!!
 
         assertEquals(1054, sealed.size)
         // version + bucket_id
@@ -143,35 +143,35 @@ class LibraryCryptoTest {
     @Test
     fun open_wrongKey_returnsNull() {
         val key = ByteArray(32) { 0x55 }
-        val sealed = LibraryCrypto.seal(key, "hello".toByteArray())!!
+        val sealed = ChainmarkCrypto.seal(key, "hello".toByteArray())!!
         val wrongKey = ByteArray(32) { 0x66 }
-        assertNull(LibraryCrypto.open(wrongKey, sealed))
+        assertNull(ChainmarkCrypto.open(wrongKey, sealed))
     }
 
     @Test
     fun open_truncated_returnsNull() {
         val key = ByteArray(32) { 0x77 }
-        val sealed = LibraryCrypto.seal(key, "hello".toByteArray())!!
-        assertNull(LibraryCrypto.open(key, sealed.copyOfRange(0, sealed.size - 1)))
+        val sealed = ChainmarkCrypto.seal(key, "hello".toByteArray())!!
+        assertNull(ChainmarkCrypto.open(key, sealed.copyOfRange(0, sealed.size - 1)))
     }
 
     @Test
     fun open_wrongVersion_returnsNull() {
         val key = ByteArray(32) { 0x88.toByte() }
-        val sealed = LibraryCrypto.seal(key, "hello".toByteArray())!!.also { it[0] = 0x02.toByte() }
-        assertNull(LibraryCrypto.open(key, sealed))
+        val sealed = ChainmarkCrypto.seal(key, "hello".toByteArray())!!.also { it[0] = 0x02.toByte() }
+        assertNull(ChainmarkCrypto.open(key, sealed))
     }
 
     @Test
     fun open_unknownBucketId_returnsNull() {
         val key = ByteArray(32) { 0x99.toByte() }
-        val sealed = LibraryCrypto.seal(key, "hello".toByteArray())!!.also { it[1] = 0x05.toByte() }
-        assertNull(LibraryCrypto.open(key, sealed))
+        val sealed = ChainmarkCrypto.seal(key, "hello".toByteArray())!!.also { it[1] = 0x05.toByte() }
+        assertNull(ChainmarkCrypto.open(key, sealed))
     }
 
     @Test
     fun open_garbage_returnsNull() {
         val key = ByteArray(32) { 0xaa.toByte() }
-        assertNull(LibraryCrypto.open(key, ByteArray(1054)))
+        assertNull(ChainmarkCrypto.open(key, ByteArray(1054)))
     }
 }

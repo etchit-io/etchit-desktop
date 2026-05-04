@@ -1,12 +1,12 @@
-package com.autonomi.antpaste.library
+package com.autonomi.antpaste.chainmark
 
 import android.content.SharedPreferences
 import com.autonomi.antpaste.wallet.WalletSigner
 
-// Implements §4 of docs/library-format-v1.md. Stores the derived AEAD key
+// Implements §4 of docs/chainmark-format-v1.md. Stores the derived AEAD key
 // per-wallet in EncryptedSharedPreferences; never persists the raw signature.
 // Re-deriving on a fresh device assumes the wallet uses RFC 6979 (§4.5).
-class LibraryKeyManager(
+class ChainmarkKeyManager(
     private val encryptedPrefs: SharedPreferences,
     private val walletSigner: WalletSigner,
 ) {
@@ -29,13 +29,13 @@ class LibraryKeyManager(
     internal fun cacheFromSignature(walletAddress: String, signatureRSV: ByteArray): ByteArray {
         require(signatureRSV.size == 65) { "personal_sign signature must be 65 bytes (r||s||v), got ${signatureRSV.size}" }
         val ikm = signatureRSV.copyOfRange(0, 64)
-        val key = LibraryCrypto.deriveKey(ikm)
+        val key = ChainmarkCrypto.deriveKey(ikm)
         writeKey(walletAddress, key)
         return key
     }
 
     fun importKey(walletAddress: String, key: ByteArray) {
-        require(key.size == LibraryCrypto.KEY_LEN) { "library key must be ${LibraryCrypto.KEY_LEN} bytes" }
+        require(key.size == ChainmarkCrypto.KEY_LEN) { "chainmark key must be ${ChainmarkCrypto.KEY_LEN} bytes" }
         writeKey(walletAddress, key)
     }
 
@@ -56,12 +56,12 @@ class LibraryKeyManager(
     private fun prefKey(walletAddress: String) = KEY_PREFIX + walletAddress.lowercase()
 
     companion object {
-        private const val KEY_PREFIX = "library_key_v1_"
+        private const val KEY_PREFIX = "chainmark_key_v1_"
 
-        // §4.1 — byte-exact sign message; SHA-256 = 5163bfef…66c0d5; 137 bytes UTF-8.
-        // Changing this string invalidates every existing library on chain.
-        const val SIGN_MESSAGE = "etchit library v1\n\n" +
-            "Sign this message to derive your encrypted-library key. " +
+        // §4.1 — byte-exact sign message; SHA-256 = ab6f4ae2…cecab0; 131 bytes UTF-8.
+        // Changing this string invalidates every existing chainmark on chain.
+        const val SIGN_MESSAGE = "etchit chainmark v1\n\n" +
+            "Sign this message to derive your chainmark key. " +
             "This signature does NOT authorize any transaction or transfer."
     }
 }

@@ -1,6 +1,6 @@
-package com.autonomi.antpaste.library
+package com.autonomi.antpaste.chainmark
 
-// Wire-format entry as it appears in the JSON payload (§9 of docs/library-format-v1.md).
+// Wire-format entry as it appears in the JSON payload (§9 of docs/chainmark-format-v1.md).
 data class WireEntry(
     val kind: String,
     val addr: String,
@@ -20,7 +20,7 @@ data class WireEntry(
 }
 
 // Canonical state for one etch after replay.
-data class LibraryEntry(
+data class ChainmarkEntry(
     val addr: String,
     val title: String,
     val ts: Long,
@@ -28,7 +28,7 @@ data class LibraryEntry(
     val isHidden: Boolean,
 )
 
-// One on-chain tx contributing to the library replay.
+// One on-chain tx contributing to the chainmark replay.
 data class TxEvent(
     val blockNum: Long,
     val txIndex: Int,

@@ -29,7 +29,7 @@ You'll also need an Android wallet that speaks WalletConnect v2 (MetaMask, Rainb
 - Raw text displays as-is
 - Other files (video, PDF, etc.) save to Downloads with an option to open
 
-**Library** *(optional, off by default)* — An encrypted on-chain index of your public etches that lets you find them on a different device. Settings → Library → Set up library, sign one message, and you have a wallet-bound encryption key cached on the device. Each entry you add — manually by address, or via the long-press action on a history row — costs one Arbitrum One transaction. Restore from chain on a second device with the same wallet to see your entries. Private etches are not synced in v0.1; use the existing Backup & Restore flow to move them between devices. Wire format and full security/privacy disclosure live in [`docs/library-format-v1.md`](docs/library-format-v1.md).
+**chain/it** *(optional, off by default)* — An encrypted on-chain index of your public etches that lets you find them on a different device. Settings → chain/it → Set up chain/it, sign one message, and you have a wallet-bound chainmark key cached on the device. Each entry you add — manually by address, or via the long-press action on a history row — costs one Arbitrum One transaction; your wallet shows the gas estimate before you sign. Sync chainmarks on a second device with the same wallet to see your entries. Private etches are not synced in v0.1; use the existing Backup & Restore flow to move them between devices. Wire format and full security/privacy disclosure live in [`docs/chainmark-format-v1.md`](docs/chainmark-format-v1.md).
 
 ## How it works
 
@@ -49,15 +49,15 @@ The approval budget means most etches only need **one wallet prompt** instead of
 
 Private data maps are stored in Android's `EncryptedSharedPreferences` backed by the hardware Keystore (AES-256). Accessing or retrieving a private etch requires biometric authentication (fingerprint, face) or your device PIN/pattern. Private data maps survive etch history clears and can only be deleted individually with confirmation.
 
-### What the library key is
+### What the chainmark key is
 
-The library key is an AES decryption password your wallet auto-generates by signing a fixed message. It only decrypts your library — it can't sign transactions or move funds. Any device using the same wallet can re-derive the same key by signing the same message, which is how the library works across devices.
+The chainmark key is an AES decryption password your wallet auto-generates by signing a fixed message. It only decrypts your chainmarks — it can't sign transactions or move funds. Any device using the same wallet can re-derive the same key by signing the same message, which is how chain/it works across devices.
 
 Two things people miss:
-- It is **not** your wallet's private key. Leaking the library key lets someone read your library, nothing else — they cannot move funds or impersonate you.
+- It is **not** your wallet's private key. Leaking the chainmark key lets someone read your chainmarks, nothing else — they cannot move funds or impersonate you.
 - You don't pick it or store it like a normal password. The wallet generates it on demand from a signature; etchit caches it encrypted-at-rest. Backing it up is an *insurance* step in case the wallet ever stops producing the same signature on a new device.
 
-For the full wire format and threat model, see [`docs/library-format-v1.md`](docs/library-format-v1.md).
+For the full wire format and threat model, see [`docs/chainmark-format-v1.md`](docs/chainmark-format-v1.md).
 
 ## Building
 

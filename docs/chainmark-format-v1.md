@@ -1,7 +1,9 @@
-# etchit cross-device library format — v1
+# etchit cross-device chainmark format — v1
+
+*Formerly known as "library v1" — same problem space, same wire-format approach, renamed to fit the chain/it brand family. Wire bytes are NOT compatible with library v1 — see §11.*
 
 Normative wire-format specification for the etchit cross-device etch
-library. Any client (Android, future Linux desktop, future web/Electron,
+chainmark index. Any client (Android, future Linux desktop, future web/Electron,
 third-party Neovim plugin, …) MUST implement this spec verbatim to
 interoperate.
 
@@ -12,20 +14,20 @@ This document defines:
 - Permanence and privacy properties any client MUST surface to users.
 
 This document does NOT define UI; clients are free to render the
-resulting library however they choose.
+resulting chain/it however they choose.
 
 ---
 
 ## 1. Scope
 
 v1 syncs **public-etch metadata only**: a per-wallet, encrypted, on-chain
-index of `(etch_address, title, timestamp, action)` entries. Private
+index (a chainmark index) of `(etch_address, title, timestamp, action)` entries. Private
 etches (those whose data map is held locally and never published) are
 explicitly out of scope for v1. See §13 for the v2 expansion path.
 
-The library is per-wallet. Each Arbitrum One wallet has at most one v1
-library, identified entirely by its address. Clients MUST NOT merge
-libraries across wallets.
+The chainmark index is per-wallet. Each Arbitrum One wallet has at most one v1
+chainmark index, identified entirely by its address. Clients MUST NOT merge
+chainmark indices across wallets.
 
 ## 2. Conventions
 
@@ -50,11 +52,11 @@ read or write v1 libraries on any chain other than Arbitrum One.
 
 ### 3.1 Per-tx recipient derivation
 
-Library transactions are sent to a **fresh, deterministic, provably-
+Chainmark transactions are sent to a **fresh, deterministic, provably-
 unowned address per transaction**, derived from the blob's nonce:
 
 ```
-to = SHA-256("etchit-library-v1/recipient" || nonce_12_bytes)[12:32]
+to = SHA-256("etchit-chainmark-v1/recipient" || nonce_12_bytes)[12:32]
 ```
 
 The 27-byte ASCII prefix is fixed; the 12-byte nonce is the same one
@@ -77,7 +79,7 @@ This pattern serves three purposes:
    (MetaMask, Coinbase Wallet) that block self-sends with calldata.
 2. Prevents the global-enumeration leak that a single fixed sentinel
    would create — a chain observer cannot run one `WHERE to = X` query
-   to find every etchit-library user.
+   to find every etchit chainmark user.
 3. Keeps the protocol etchit-agnostic: no contract is deployed, no
    single address is ever reused.
 
@@ -93,19 +95,19 @@ EIP-191 `personal_sign`. The message is byte-exact: UTF-8, LF (`0x0A`)
 line endings, no trailing newline.
 
 ```
-etchit library v1
+etchit chainmark v1
 
-Sign this message to derive your encrypted-library key. This signature does NOT authorize any transaction or transfer.
+Sign this message to derive your chainmark key. This signature does NOT authorize any transaction or transfer.
 ```
 
 Concretely (no quotes; `\n` denotes the LF byte):
 
 ```
-etchit library v1\n\nSign this message to derive your encrypted-library key. This signature does NOT authorize any transaction or transfer.
+etchit chainmark v1\n\nSign this message to derive your chainmark key. This signature does NOT authorize any transaction or transfer.
 ```
 
 The string is 137 bytes (UTF-8). SHA-256 of those bytes:
-`5163bfeff8f6fa44563730938abbe6a23b35aa890868754e22ff15af7666c0d5`.
+`ab6f4ae288e6053c3e2181c83e33065c870a8b58b76b1d6b0072aba658cecab0`.
 
 The `personal_sign` prefix (`"\x19Ethereum Signed Message:\n" + len`)
 is applied by the wallet per EIP-191 §6.b. Clients MUST NOT apply the
@@ -125,10 +127,10 @@ Algorithm: HKDF-SHA256 (RFC 5869).
 |---|---|
 | salt | empty (0 bytes) |
 | IKM | 64 bytes (`r \|\| s`) |
-| info | ASCII bytes `etchit-library/v1/aead-key` (26 bytes) |
+| info | ASCII bytes `etchit-chainmark/v1/aead-key` (26 bytes) |
 | L | 32 bytes |
 
-Output: 32 bytes — the **library AEAD key**.
+Output: 32 bytes — the **chainmark AEAD key**.
 
 ### 4.4 Key cache
 
@@ -149,20 +151,20 @@ AppKit's reference signers) use.
 
 A wallet that does NOT implement RFC 6979 will produce a different
 signature on each call, derive a different key, and fail to decrypt
-previously-encrypted library entries. v1 clients SHOULD:
+previously-encrypted chainmark entries. v1 clients SHOULD:
 
 - Treat re-derivation as "best effort" — if the new key fails to
   AEAD-verify any existing entries on chain, surface a clear error
-  rather than silently replacing the library.
-- Offer the user a "Back up library key" export so the 32-byte key
+  rather than silently replacing the chainmark index.
+- Offer the user a "Back up chainmark key" export so the 32-byte key
   itself can be saved (e.g. to a password manager) as a recovery
   backstop independent of wallet determinism.
-- Offer a corresponding "Restore library key" import that bypasses the
+- Offer a corresponding "Restore chainmark key" import that bypasses the
   signature flow entirely.
 
 This is the only assumption v1 makes about wallet implementation
 behavior beyond the EIP-191 wire format. Future versions MAY remove the
-assumption by introducing a per-library on-chain salt; v1 trades that
+assumption by introducing a per-wallet on-chain salt; v1 trades that
 complexity for simplicity.
 
 ## 5. AEAD
@@ -277,12 +279,12 @@ Unknown entry fields MUST be ignored by readers.
 ### 9.3 Action semantics
 
 - `add` — assert ownership of an etch the user created. The entry
-  becomes visible in the user's library.
+  becomes visible in the user's chainmark index.
 - `bookmark` — assert interest in an etch the user did not necessarily
   create (e.g. someone else's address pasted in). Visible, marked as a
   bookmark by the UI. Functionally equivalent to `add` for replay
   purposes except for the rendering hint.
-- `hide` — tombstone. The entry is hidden from the user's library
+- `hide` — tombstone. The entry is hidden from the user's chainmark index
   view. The on-chain entry remains permanent.
 
 Encoders MUST emit exactly one of these three values.
@@ -297,7 +299,7 @@ becomes readable.
 Clients MUST surface a permanence warning to the user before the first
 batch is sent. Recommended copy:
 
-> Library entries are stored encrypted on Arbitrum forever. If your
+> Chainmark entries are stored encrypted on Arbitrum forever. If your
 > wallet is ever compromised, every title you have ever synced —
 > including hidden ones — becomes readable. Avoid sensitive titles.
 
@@ -367,7 +369,7 @@ BlockScout, Alchemy, or a self-hosted equivalent).
 The indexer is treated as **untrusted but liveness-relied-upon**:
 
 - An indexer cannot **forge** entries — random calldata will not
-  AEAD-decrypt under the user's library key.
+  AEAD-decrypt under the user's chainmark index key.
 - An indexer can **omit** entries (censorship / staleness).
 
 Clients SHOULD:
@@ -375,7 +377,7 @@ Clients SHOULD:
 - Warn the user if the highest replayed block is significantly behind
   the chain head.
 - Cache replayed state locally so transient indexer outages do not
-  blank the library.
+  blank the chainmark index.
 
 ## 13. Versioning
 
@@ -388,7 +390,7 @@ Clients SHOULD:
 
 - `kind: "private_backup"` — reserved for v2 (per-private-etch
   encrypted backup blob etched publicly to Autonomi, with the
-  library entry referencing only the address and a separately
+  chainmark entry referencing only the address and a separately
   user-controlled password).
 - Argon2id-based KDF — reserved for a future envelope version.
 - Additional padding buckets — reserved.
@@ -402,12 +404,12 @@ Clients MUST surface the following to users in onboarding:
 
 ### Already public (no change)
 - The wallet's address ↔ public-etch xor-name linkage is already
-  visible on-chain via `PaymentVault` calls. The library does not
+  visible on-chain via `PaymentVault` calls. The chain/it system does not
   worsen this.
 
 ### New on-chain footprint
-- Each library tx goes to a fresh per-tx address (§3.1), so chain
-  observers cannot enumerate library users with a single `WHERE to = X`
+- Each chainmark tx goes to a fresh per-tx address (§3.1), so chain
+  observers cannot enumerate chainmark users with a single `WHERE to = X`
   query. Identifying a tx as ours requires recomputing the §3.1
   derivation against its calldata nonce — cheap per-tx, expensive over
   the full chain.
@@ -421,14 +423,14 @@ Clients MUST surface the following to users in onboarding:
 ### Permanence (must warn)
 - Every batch is a permanent on-chain artifact.
 - Hide is a tombstone, not deletion; the original entry remains
-  decryptable forever by anyone with the library key.
-- Forgetting to "Remove from library" before deleting an etch locally
-  means a second device restoring the library will still see the
+  decryptable forever by anyone with the chainmark index key.
+- Forgetting to "Remove from chain/it" before deleting an etch locally
+  means a second device restoring the chainmark index will still see the
   reference. UI must distinguish these.
 
 ### Off the table (rejected during design)
 - A naming registry, an event-only logging contract, or any other
-  etchit-deployed-and-operated chain artifact. The library has zero
+  etchit-deployed-and-operated chain artifact. chain/it has zero
   ongoing operational dependencies on etchit-the-org.
 
 ## 15. Test vectors
@@ -442,7 +444,7 @@ Inputs:
 
 ```
 sign-message (UTF-8, no trailing newline):
-  etchit library v1\n\nSign this message to derive your encrypted-library key. This signature does NOT authorize any transaction or transfer.
+  etchit chainmark v1\n\nSign this message to derive your chainmark key. This signature does NOT authorize any transaction or transfer.
 
 personal_sign signature (hex, 65 bytes — example only; substitute your own
 when self-testing):
@@ -452,7 +454,7 @@ when self-testing):
 Expected derivation:
 
 - IKM = signature[0..64] (`r || s`).
-- HKDF-SHA256(salt=empty, IKM=IKM, info=`"etchit-library/v1/aead-key"`, L=32).
+- HKDF-SHA256(salt=empty, IKM=IKM, info=`"etchit-chainmark/v1/aead-key"`, L=32).
 
 This document will be updated with a fixed signature and expected key
 once a stable test wallet is available. Implementations may
@@ -469,20 +471,20 @@ plaintext = "0001000000{}\x00...\x00"   (frame: payload_len=12, payload="{\"v\":
 
 Expected `version=0x01, bucket_id=0x00, nonce=…, ciphertext+tag` MUST
 match across implementations. Final hex will be added once
-LibraryCrypto.kt golden tests are written.
+ChainmarkCrypto.kt golden tests are written.
 
 ### 15.3 Replay vector
 
 A canonical multi-batch replay fixture (add → hide → add) with
 hand-encoded JSON and pre-computed ciphertexts will be added under
-`docs/library-format-v1.test-vectors.json` once the Kotlin
+`docs/chainmark-format-v1.test-vectors.json` once the Kotlin
 implementation lands. Cross-client implementations MUST pass it
 unchanged.
 
 ## 16. Non-goals
 
-- Discoverability (others finding your library) — out of scope.
-- Sharing libraries across wallets — out of scope.
+- Discoverability (others finding your chainmarks) — out of scope.
+- Sharing chainmark indices across wallets — out of scope.
 - Mutating individual entries in place — impossible (chain is
   immutable). Mutate via append.
 - Compression — out of scope; padding buckets dominate.
@@ -492,7 +494,7 @@ unchanged.
 
 ## 17. Reference implementations
 
-- `app/src/main/java/com/autonomi/antpaste/library/` — Kotlin (Android), this repository.
+- `app/src/main/java/com/autonomi/antpaste/chainmark/` — Kotlin (Android), this repository.
 
 Future:
 - Rust crate (Linux desktop, Neovim plugin shared backend).

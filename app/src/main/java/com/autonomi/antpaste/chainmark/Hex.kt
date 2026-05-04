@@ -1,6 +1,6 @@
-package com.autonomi.antpaste.library
+package com.autonomi.antpaste.chainmark
 
-// Tiny hex helpers, kept inside the library package so it doesn't depend
+// Tiny hex helpers, kept inside the chainmark package so it doesn't depend
 // on `wallet/Erc20`'s internal helpers.
 internal object Hex {
     fun encode(bytes: ByteArray): String =

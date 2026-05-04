@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>etchit library viewer</title>
+<title>etchit chain/it viewer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
@@ -75,27 +75,27 @@
 </head>
 <body>
 <main>
-  <h1>etchit library viewer</h1>
-  <p class="sub">Read-only static page. Decrypts your on-chain library entries client-side and lists them with the matching <code>ant-cli</code> command per entry. Nothing leaves your browser except the BlockScout HTTP query.</p>
+  <h1>etchit chain/it viewer</h1>
+  <p class="sub">Read-only static page. Decrypts your on-chain chainmarks client-side and lists them with the matching <code>ant-cli</code> command per entry. Nothing leaves your browser except the BlockScout HTTP query.</p>
 
   <div class="controls" style="margin-top: 0; margin-bottom: 8px;">
     <button id="connect">Connect wallet</button>
     <span id="connectStatus" class="status"></span>
   </div>
-  <p class="sub" style="font-size: 12px; margin-top: 4px;">Uses your browser-extension wallet (MetaMask, Rabby, Coinbase) to sign the same library-derive message the mobile app uses, so the key is recreated automatically — no copy-paste.</p>
+  <p class="sub" style="font-size: 12px; margin-top: 4px;">Uses your browser-extension wallet (MetaMask, Rabby, Coinbase) to sign the same chainmark-derive message the mobile app uses, so the key is recreated automatically — no copy-paste.</p>
 
   <details id="manualSection">
     <summary>Or enter key manually</summary>
     <label for="wallet">Wallet address</label>
     <input id="wallet" type="text" placeholder="0x… (40 hex chars)" autocomplete="off" spellcheck="false">
 
-    <label for="key">Library key (Settings → Library → Back up library key)</label>
+    <label for="key">Chainmark key (Settings → chain/it → Back up chainmark key)</label>
     <div style="display:flex; gap:8px;">
       <input id="key" type="password" placeholder="64 hex chars" autocomplete="new-password" spellcheck="false" style="flex:1;">
       <button id="toggleKey" type="button" class="outlined" style="padding:0 10px;">Show</button>
     </div>
     <div class="controls" style="margin-top: 12px;">
-      <button id="decodeManual">Decode library</button>
+      <button id="decodeManual">Decode chain/it</button>
     </div>
   </details>
 
@@ -111,7 +111,7 @@
 
   <div class="results" id="results"></div>
 
-  <p class="footer">Spec: <code>docs/library-format-v1.md</code>. Decrypt logic mirrors the Kotlin reference implementation; both round-trip the same wire format. Open this page from <code>file://</code> for fully offline use after one BlockScout fetch.</p>
+  <p class="footer">Spec: <code>docs/chainmark-format-v1.md</code>. Decrypt logic mirrors the Kotlin reference implementation; both round-trip the same wire format. Open this page from <code>file://</code> for fully offline use after one BlockScout fetch.</p>
 </main>
 
 <script>
@@ -121,16 +121,16 @@ const VERSION_BYTE = 0x01;
 const NONCE_LEN = 12;
 const TAG_LEN = 16;
 const BUCKETS = [1024, 4096, 16384];
-const RECIPIENT_PREFIX = new TextEncoder().encode("etchit-library-v1/recipient");
+const RECIPIENT_PREFIX = new TextEncoder().encode("etchit-chainmark-v1/recipient");
 
 // Spec §4.1 — byte-exact (137 bytes UTF-8). Same string the mobile app signs.
 const SIGN_MESSAGE =
-  "etchit library v1\n\n" +
-  "Sign this message to derive your encrypted-library key. " +
+  "etchit chainmark v1\n\n" +
+  "Sign this message to derive your chainmark key. " +
   "This signature does NOT authorize any transaction or transfer.";
 
 // Spec §4.3 — HKDF info string for the AEAD key derivation.
-const HKDF_INFO = new TextEncoder().encode("etchit-library/v1/aead-key");
+const HKDF_INFO = new TextEncoder().encode("etchit-chainmark/v1/aead-key");
 
 // ── tiny helpers ─────────────────────────────────────────────────
 
@@ -254,7 +254,7 @@ async function fetchAndDecode(walletAddr, keyMaterial, indexerBase) {
 
 // ── HKDF (§4.3) — derive 32-byte AES key from a wallet signature ─────
 
-async function deriveLibraryKey(signatureHex) {
+async function deriveChainmarkKey(signatureHex) {
   // signatureHex is 0x-prefixed (r||s||v), 65 bytes total. Spec uses (r||s) as IKM.
   const sigBytes = hexToBytes(signatureHex);
   if (sigBytes.length !== 65) throw new Error(`unexpected sig length ${sigBytes.length}`);
@@ -282,7 +282,7 @@ async function connectAndDeriveKey() {
     method: "personal_sign",
     params: [messageHex, wallet],
   });
-  const key = await deriveLibraryKey(sigHex);
+  const key = await deriveChainmarkKey(sigHex);
   return { wallet, key };
 }
 
@@ -299,7 +299,7 @@ function render(entries) {
   if (!visible.length) {
     const div = document.createElement("div");
     div.className = "empty";
-    div.textContent = "Library is empty (or all entries are hidden).";
+    div.textContent = "No chainmarks yet (or all entries are hidden).";
     root.appendChild(div);
     return;
   }
@@ -385,7 +385,7 @@ $("decodeManual").addEventListener("click", async () => {
     return status("Invalid wallet address (need 0x + 40 hex chars).", "err");
   }
   if (!/^[0-9a-fA-F]{64}$/.test(keyHex)) {
-    return status(`Invalid library key (need 64 hex chars, got ${keyHex.length}).`, "err");
+    return status(`Invalid chainmark key (need 64 hex chars, got ${keyHex.length}).`, "err");
   }
 
   const btn = $("decodeManual");

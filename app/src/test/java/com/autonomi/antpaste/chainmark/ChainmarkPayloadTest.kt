@@ -1,4 +1,4 @@
-package com.autonomi.antpaste.library
+package com.autonomi.antpaste.chainmark
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -7,7 +7,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class LibraryPayloadTest {
+class ChainmarkPayloadTest {
 
     private val A = "a".repeat(64)
     private val B = "b".repeat(64)
@@ -17,7 +17,7 @@ class LibraryPayloadTest {
 
     @Test
     fun encode_emptyEntries() {
-        val s = LibraryPayload.encode(emptyList())
+        val s = ChainmarkPayload.encode(emptyList())
         val obj = JSONObject(s)
         assertEquals(1, obj.getInt("v"))
         assertEquals(0, obj.getJSONArray("entries").length())
@@ -25,7 +25,7 @@ class LibraryPayloadTest {
 
     @Test
     fun encode_singleEntry_shape() {
-        val s = LibraryPayload.encode(listOf(add(A, "hello", 1714572800)))
+        val s = ChainmarkPayload.encode(listOf(add(A, "hello", 1714572800)))
         val obj = JSONObject(s)
         val arr = obj.getJSONArray("entries")
         assertEquals(1, arr.length())
@@ -44,22 +44,22 @@ class LibraryPayloadTest {
             WireEntry(WireEntry.KIND_PUBLIC, B, "second", 200, WireEntry.ACTION_BOOKMARK),
             WireEntry(WireEntry.KIND_PUBLIC, A, "", 300, WireEntry.ACTION_HIDE),
         )
-        val s = LibraryPayload.encode(originals)
-        val decoded = LibraryPayload.decode(s)
+        val s = ChainmarkPayload.encode(originals)
+        val decoded = ChainmarkPayload.decode(s)
         assertNotNull(decoded)
         assertEquals(originals, decoded)
     }
 
     @Test
     fun decode_garbage_returnsNull() {
-        assertNull(LibraryPayload.decode(""))
-        assertNull(LibraryPayload.decode("not json"))
-        assertNull(LibraryPayload.decode("[]"))
+        assertNull(ChainmarkPayload.decode(""))
+        assertNull(ChainmarkPayload.decode("not json"))
+        assertNull(ChainmarkPayload.decode("[]"))
     }
 
     @Test
     fun decode_wrongVersion_returnsNull() {
-        assertNull(LibraryPayload.decode("""{"v":2,"entries":[]}"""))
+        assertNull(ChainmarkPayload.decode("""{"v":2,"entries":[]}"""))
     }
 
     @Test
@@ -68,7 +68,7 @@ class LibraryPayloadTest {
             {"kind":"private_backup","addr":"$A","title":"x","ts":1,"action":"add"},
             {"kind":"public","addr":"$B","title":"y","ts":2,"action":"add"}
         ]}""".trimIndent()
-        val decoded = LibraryPayload.decode(s)!!
+        val decoded = ChainmarkPayload.decode(s)!!
         assertEquals(1, decoded.size)
         assertEquals(B, decoded[0].addr)
     }
@@ -79,7 +79,7 @@ class LibraryPayloadTest {
             {"kind":"public","addr":"$A","title":"x","ts":1,"action":"delete"},
             {"kind":"public","addr":"$B","title":"y","ts":2,"action":"add"}
         ]}""".trimIndent()
-        val decoded = LibraryPayload.decode(s)!!
+        val decoded = ChainmarkPayload.decode(s)!!
         assertEquals(1, decoded.size)
         assertEquals(B, decoded[0].addr)
     }
@@ -91,7 +91,7 @@ class LibraryPayloadTest {
             {"kind":"public","addr":"${A.uppercase()}","title":"x","ts":2,"action":"add"},
             {"kind":"public","addr":"$B","title":"y","ts":3,"action":"add"}
         ]}""".trimIndent()
-        val decoded = LibraryPayload.decode(s)!!
+        val decoded = ChainmarkPayload.decode(s)!!
         assertEquals(1, decoded.size)
         assertEquals(B, decoded[0].addr)
     }
@@ -103,7 +103,7 @@ class LibraryPayloadTest {
             {"kind":"public","addr":"$A","title":"$tooBig","ts":1,"action":"add"},
             {"kind":"public","addr":"$B","title":"ok","ts":2,"action":"add"}
         ]}""".trimIndent()
-        val decoded = LibraryPayload.decode(s)!!
+        val decoded = ChainmarkPayload.decode(s)!!
         assertEquals(1, decoded.size)
         assertEquals(B, decoded[0].addr)
     }
@@ -111,18 +111,18 @@ class LibraryPayloadTest {
     @Test
     fun decode_ignoresUnknownTopLevelFields() {
         val s = """{"v":1,"entries":[],"extra":"ignored","more":42}"""
-        val decoded = LibraryPayload.decode(s)
+        val decoded = ChainmarkPayload.decode(s)
         assertNotNull(decoded)
         assertTrue(decoded!!.isEmpty())
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun encode_rejectsUnknownKind() {
-        LibraryPayload.encode(listOf(WireEntry("private_backup", A, "x", 1, "add")))
+        ChainmarkPayload.encode(listOf(WireEntry("private_backup", A, "x", 1, "add")))
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun encode_rejectsUnknownAction() {
-        LibraryPayload.encode(listOf(WireEntry("public", A, "x", 1, "delete")))
+        ChainmarkPayload.encode(listOf(WireEntry("public", A, "x", 1, "delete")))
     }
 }

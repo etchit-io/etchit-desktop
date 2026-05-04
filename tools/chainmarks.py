@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-List your etchit library on any machine.
+List your etchit chainmarks on any machine.
 
     pip install cryptography     # or: apt install python3-cryptography
-    python3 library.py <wallet-address>          # prompts for key (no echo)
-    python3 library.py <wallet-address> -        # read key from stdin (one line)
+    python3 chainmarks.py <wallet-address>          # prompts for key (no echo)
+    python3 chainmarks.py <wallet-address> -        # read key from stdin (one line)
 
 Reads BlockScout for the wallet's Arbitrum tx history, decrypts each
-library batch with the supplied AES-256-GCM key, replays add/bookmark/
+chainmark batch with the supplied AES-256-GCM key, replays add/bookmark/
 hide actions, and prints the visible entries with the matching
 ant-cli download command per entry.
 
 The key is never read from argv (would land in shell history + `ps`).
-Get it from the mobile app: Settings → Library → Back up library key.
+Get it from the mobile app: Settings → chain/it → Back up chainmark key.
 
-Spec: ../docs/library-format-v1.md (sections 3.1, 4-11). Cross-impl
+Spec: ../docs/chainmark-format-v1.md (sections 3.1, 4-11). Cross-impl
 test vector: this file is independent from the Kotlin implementation
 and round-trips through the same wire format.
 """
@@ -28,7 +28,7 @@ import urllib.request
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 INDEXER_BASE = "https://arbitrum.blockscout.com/api"
-RECIPIENT_PREFIX = b"etchit-library-v1/recipient"
+RECIPIENT_PREFIX = b"etchit-chainmark-v1/recipient"
 VERSION_BYTE = 0x01
 NONCE_LEN = 12
 TAG_LEN = 16
@@ -144,16 +144,16 @@ def main() -> int:
     if len(sys.argv) == 3 and sys.argv[2] == "-":
         key_hex = sys.stdin.readline().strip().removeprefix("0x")
     else:
-        key_hex = getpass.getpass("library key (hex, no echo): ").strip().removeprefix("0x")
+        key_hex = getpass.getpass("chainmark key (hex, no echo): ").strip().removeprefix("0x")
 
     if not re.fullmatch(r"[0-9a-fA-F]{64}", key_hex):
-        print(f"invalid library key (need 64 hex chars, got {len(key_hex)})", file=sys.stderr)
+        print(f"invalid chainmark key (need 64 hex chars, got {len(key_hex)})", file=sys.stderr)
         return 1
 
     entries = replay(wallet, bytes.fromhex(key_hex))
     visible = [e for e in entries if not e["hidden"]]
     if not visible:
-        print("(empty library)")
+        print("(empty chain/it)")
         return 0
     for e in visible:
         marker = "★" if e["bookmark"] else " "

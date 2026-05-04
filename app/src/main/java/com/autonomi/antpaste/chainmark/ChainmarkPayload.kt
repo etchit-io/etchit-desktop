@@ -1,12 +1,12 @@
-package com.autonomi.antpaste.library
+package com.autonomi.antpaste.chainmark
 
 import org.json.JSONArray
 import org.json.JSONObject
 
-// JSON codec for the library payload (§9 of docs/library-format-v1.md).
+// JSON codec for the chainmark payload (§9 of docs/chainmark-format-v1.md).
 // Encoding is strict; decoding tolerates unknown fields and skips
 // malformed/unknown-kind/unknown-action entries (spec requires silent skip).
-object LibraryPayload {
+object ChainmarkPayload {
 
     const val SCHEMA_VERSION = 1
 

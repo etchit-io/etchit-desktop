@@ -1,10 +1,10 @@
-package com.autonomi.antpaste.library
+package com.autonomi.antpaste.chainmark
 
 interface IndexerClient {
-    // Returns all txs where from == [walletAddress] and to == LibraryCrypto.SENTINEL_ADDRESS
+    // Returns all txs where from == [walletAddress] and to == ChainmarkCrypto.SENTINEL_ADDRESS
     // and value == 0, in any order — caller sorts. Implementations MAY return more txs
     // (replay tolerates unrelated calldata via AEAD failure). Throws on transport / parse failure.
-    suspend fun listLibraryTxs(walletAddress: String): List<IndexedTx>
+    suspend fun listChainmarkTxs(walletAddress: String): List<IndexedTx>
 }
 
 data class IndexedTx(
