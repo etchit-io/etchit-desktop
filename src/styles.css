@@ -119,6 +119,43 @@ input[type=text]:focus, input[type=password]:focus {
   margin-bottom: 4px;
 }
 
+/* Syntax highlighting tokens — applied to <pre class="fetch-text"> children. */
+.hl-keyword { color: #c9732b; }                                /* copper */
+.hl-literal { color: #e58a3f; }                                /* copper-bright */
+.hl-string  { color: #b8a37e; }                                /* warm sand */
+.hl-number  { color: #a3b5a8; }                                /* soft sage */
+.hl-comment { color: #8a8a8a; font-style: italic; }            /* ash, italic */
+.hl-heading { color: #e58a3f; font-weight: 600; }
+.hl-bold    { font-weight: 700; }
+.hl-italic  { font-style: italic; }
+
+.hl-lang-select {
+  background: var(--ink-3);
+  color: var(--bone);
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  font: inherit;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  padding: 4px 8px;
+  margin-left: 8px;
+  cursor: pointer;
+}
+.hl-lang-select:hover { border-color: var(--copper); }
+.hl-lang-select:focus { outline: 0; border-color: var(--copper); }
+.hl-lang-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.hl-lang-row .hl-lang-label {
+  color: var(--ash);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 button {
   padding: 10px 18px;
   background: var(--copper);

@@ -11,6 +11,7 @@ import { EthersAdapter } from "@reown/appkit-adapter-ethers";
 import { arbitrum } from "@reown/appkit/networks";
 import { Interface, JsonRpcProvider, type Eip1193Provider } from "ethers";
 import { BIP39_WORDLIST } from "./wordlist-bip39";
+import { LANGUAGES, highlightAs } from "./syntaxHighlight";
 
 // EVM constants — match BuildConfig in etchit-android-v3/app/build.gradle.kts.
 const ARBITRUM_RPC = "https://arb1.arbitrum.io/rpc";
@@ -1156,10 +1157,33 @@ function renderText(parent: HTMLElement, title: string, content: string): void {
     t.textContent = title;
     parent.appendChild(t);
   }
+  // Language picker — sits above the rendered text. Default Plain (no markup).
+  const langRow = document.createElement("div");
+  langRow.className = "hl-lang-row";
+  const label = document.createElement("span");
+  label.className = "hl-lang-label";
+  label.textContent = "syntax";
+  langRow.appendChild(label);
+  const select = document.createElement("select");
+  select.className = "hl-lang-select";
+  for (const lang of LANGUAGES) {
+    const opt = document.createElement("option");
+    opt.value = lang.id;
+    opt.textContent = lang.name;
+    select.appendChild(opt);
+  }
+  select.value = "plain";
+  langRow.appendChild(select);
+  parent.appendChild(langRow);
+
   const pre = document.createElement("pre");
   pre.className = "fetch-text";
   pre.textContent = content;
   parent.appendChild(pre);
+
+  select.addEventListener("change", () => {
+    pre.innerHTML = highlightAs(content, select.value);
+  });
 }
 
 // ── Private etch storage (Phase 3c) ──────────────────────────────
