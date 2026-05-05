@@ -1,6 +1,6 @@
 [package]
 name = "etchit-desktop"
-version = "0.2.2"
+version = "0.2.3"
 description = "etchit desktop client"
 authors = ["etchit-io"]
 edition = "2021"
