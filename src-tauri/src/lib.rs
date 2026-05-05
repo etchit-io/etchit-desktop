@@ -175,6 +175,18 @@ async fn fetch_private(data_map_hex: String, state: State<'_, AppState>) -> Resu
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Disable WebKit2GTK's DMABUF renderer on Linux. The default DMABUF path
+    // glitches on a range of Mesa/Wayland combos — symptom we hit was the
+    // WebView only filling half the GTK window after a resize. The legacy
+    // EGL/GLES renderer is the safe fallback. Set BEFORE any WebKit init,
+    // and only when not already overridden by the user's environment.
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+
     // Bridge log:: macros into tracing, then init a stderr fmt subscriber.
     // ant-core / ant-node / saorsa-* use both log + tracing; this captures
     // both. Default filter keeps DHT activity visible at warn level — the
