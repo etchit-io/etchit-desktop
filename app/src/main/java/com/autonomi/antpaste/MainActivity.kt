@@ -138,6 +138,25 @@ class MainActivity : AppCompatActivity() {
             uri?.let { handleAttachedTextFile(it) }
         }
 
+    // Holds the text to be saved by the SAF launcher — captured at the moment
+    // of launch (double-tap → "Save as file…") and consumed in the callback.
+    private var pendingTextToSave: String? = null
+    private val saveTextLauncher: ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+            val text = pendingTextToSave
+            pendingTextToSave = null
+            if (uri == null || text == null) return@registerForActivityResult
+            try {
+                contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                Snackbar.make(binding.root, "Saved", Snackbar.LENGTH_SHORT)
+                    .setBackgroundTint(INK_3)
+                    .setTextColor(STATUS_GREEN)
+                    .show()
+            } catch (e: Exception) {
+                showStatus("Save failed: ${e.shortMessage()}", isError = true)
+            }
+        }
+
     private var nativeClient: Client? = null
     private var storeJob: Job? = null
     private lateinit var etchHistory: EtchHistory
@@ -439,12 +458,51 @@ class MainActivity : AppCompatActivity() {
             attachTextFileLauncher.launch(TEXT_MIME_TYPES)
         }
 
+        // Double-tap on the etch input opens a fullscreen editor — useful when
+        // the typed/pasted text is much larger than the input box. Closing the
+        // editor commits the new text back. Save-as-file in the editor lets
+        // you keep a local copy before etching.
+        val contentInputGd = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
+                showFullScreenTextDialog(
+                    title = "Edit etch content",
+                    initialText = binding.contentInput.text.toString(),
+                    editable = true,
+                    onCommit = { newText ->
+                        binding.contentInput.setText(newText)
+                        binding.contentInput.setSelection(newText.length)
+                    },
+                )
+                return true
+            }
+        })
         binding.contentInput.setOnTouchListener { v, event ->
             v.parent?.requestDisallowInterceptTouchEvent(true)
             if (event.actionMasked == android.view.MotionEvent.ACTION_UP ||
                 event.actionMasked == android.view.MotionEvent.ACTION_CANCEL) {
                 v.parent?.requestDisallowInterceptTouchEvent(false)
             }
+            contentInputGd.onTouchEvent(event)
+            false
+        }
+
+        // Same gesture on the fetch result content — long content is currently
+        // truncated to maxLines=20 with an ellipsis, so double-tap opens a
+        // read-only fullscreen view of the entire fetched text plus a
+        // Save-as-file action.
+        val resultContentGd = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
+                showFullScreenTextDialog(
+                    title = binding.resultTitle.text?.toString().orEmpty().ifBlank { "Fetched content" },
+                    initialText = binding.resultContent.text.toString(),
+                    editable = false,
+                )
+                return true
+            }
+        })
+        binding.resultContent.isClickable = true
+        binding.resultContent.setOnTouchListener { _, event ->
+            resultContentGd.onTouchEvent(event)
             false
         }
 
@@ -3168,6 +3226,72 @@ class MainActivity : AppCompatActivity() {
 
     private fun parseEnvelope(raw: String): Pair<String, String> =
         PasteUtils.parseEnvelope(raw)
+
+    // Fullscreen text dialog — covers two cases triggered by double-tap:
+    //   1. editable=true: edit the etch content in a tall focused editor.
+    //      onCommit fires with the edited text when the user taps Done.
+    //   2. editable=false: read-only view of fetched text that's been
+    //      truncated to maxLines in the result card. Lets the user scroll
+    //      the full content and select / copy.
+    // Both flows include a "Save as file…" action that uses the SAF
+    // CreateDocument launcher to write the current text out as .txt.
+    private fun showFullScreenTextDialog(
+        title: String,
+        initialText: String,
+        editable: Boolean,
+        onCommit: ((String) -> Unit)? = null,
+    ) {
+        val dp = resources.displayMetrics.density
+        val pad = (16 * dp).toInt()
+
+        val editText = EditText(this).apply {
+            setText(initialText)
+            setTextColor(BONE)
+            setHintTextColor(ASH)
+            textSize = 14f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(pad, pad, pad, pad)
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            setBackgroundColor(INK_2)
+            isFocusable = editable
+            isFocusableInTouchMode = editable
+            isCursorVisible = editable
+            inputType = if (editable) {
+                android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                    android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            } else {
+                android.text.InputType.TYPE_NULL
+            }
+            if (!editable) setTextIsSelectable(true)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.MATCH_PARENT,
+            )
+            if (editable) setSelection(initialText.length)
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(editText)
+            .setPositiveButton(if (editable) "Done" else "Close") { _, _ ->
+                if (editable) onCommit?.invoke(editText.text.toString())
+            }
+            .setNeutralButton("Save as file…") { _, _ ->
+                val text = editText.text.toString()
+                if (editable) onCommit?.invoke(text)
+                pendingTextToSave = text
+                val baseName = title.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "etchit" }
+                saveTextLauncher.launch("$baseName.txt")
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.window?.setLayout(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+        )
+        dialog.show()
+    }
 
     private fun showResult(title: String, address: String, content: String) {
         binding.resultTitle.text = title
