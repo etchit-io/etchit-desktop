@@ -50,10 +50,13 @@ fun SyntaxHighlighter.applyTokens(
     SyntaxHighlighters.clear(editable)
     for (t in tokens) {
         if (t.end <= rangeStart || t.start >= rangeEnd) continue
-        if (t.color >= 0) editable.setSpan(
+        // The "no value" sentinel is -1 (default in HighlightToken). Plain
+        // ">= 0" doesn't work because ARGB colours with full alpha are
+        // negative when read as a signed Int, so we'd reject every brand colour.
+        if (t.color != -1) editable.setSpan(
             ForegroundColorSpan(t.color), t.start, t.end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
         )
-        if (t.style >= 0) editable.setSpan(
+        if (t.style != -1) editable.setSpan(
             StyleSpan(t.style), t.start, t.end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
         )
     }
