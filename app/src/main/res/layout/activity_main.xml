@@ -202,7 +202,16 @@
                     android:gravity="top"
                     android:inputType="textMultiLine"
                     android:scrollHorizontally="false"
-                    android:lineSpacingMultiplier="1.3"
+                    android:lineSpacingMultiplier="1.3" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="double-tap to expand"
+                    android:textColor="@color/text_muted"
+                    android:textSize="11sp"
+                    android:textStyle="italic"
+                    android:layout_marginTop="4dp"
                     android:layout_marginBottom="14dp" />
 
                 <!-- Private toggle -->
