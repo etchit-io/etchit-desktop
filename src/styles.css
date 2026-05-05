@@ -119,11 +119,11 @@ input[type=text]:focus, input[type=password]:focus {
   margin-bottom: 4px;
 }
 
-/* Syntax highlighting tokens — applied to <pre class="fetch-text"> children. */
+/* Syntax highlighting tokens — strict brand palette (etchit-brand.html). */
 .hl-keyword { color: #c9732b; }                                /* copper */
 .hl-literal { color: #e58a3f; }                                /* copper-bright */
-.hl-string  { color: #b8a37e; }                                /* warm sand */
-.hl-number  { color: #a3b5a8; }                                /* soft sage */
+.hl-string  { color: #d6cfc0; }                                /* bone-dim */
+.hl-number  { color: #6ab04c; }                                /* signal-ok */
 .hl-comment { color: #8a8a8a; font-style: italic; }            /* ash, italic */
 .hl-heading { color: #e58a3f; font-weight: 600; }
 .hl-bold    { font-weight: 700; }
