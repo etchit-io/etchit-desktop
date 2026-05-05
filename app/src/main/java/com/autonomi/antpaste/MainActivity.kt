@@ -3492,23 +3492,30 @@ class MainActivity : AppCompatActivity() {
             charCount.text = String.format(java.util.Locale.US, "%,d", n)
         }
         updateCharCount()
-        // Compute the visible character range with a buffer of ±200 visual
-        // lines and run the highlighter just over that slice. Buffer is wide
-        // enough that even a fast fling stays inside an already-coloured region
-        // long enough for the next throttled re-apply to catch up. Span count
-        // stays bounded (~few hundred) regardless of document size.
-        fun rehighlightVisible() {
+        // Token cache — populated once per text change (or language change),
+        // reused on every scroll. Keeps the regex pass off the scroll path,
+        // so scroll-time work is just clear() + a small number of setSpan
+        // calls for tokens in the visible range.
+        var cachedTokens: List<HighlightToken> = emptyList()
+        var cachedForLang: SyntaxHighlighter? = null
+        var cachedForTextHash: Int = 0
+        fun ensureTokenCache() {
+            val text = editText.text ?: return
+            val hash = text.toString().hashCode()
+            if (currentHighlighter === cachedForLang && hash == cachedForTextHash) return
+            cachedTokens = if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) emptyList()
+                           else currentHighlighter.tokenize(text)
+            cachedForLang = currentHighlighter
+            cachedForTextHash = hash
+        }
+        fun applyVisible() {
             val text = editText.text ?: return
             if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) {
                 SyntaxHighlighters.clear(text)
                 return
             }
             val layout = editText.layout
-            if (layout == null || layout.lineCount == 0) {
-                // Layout not ready yet — full-doc fall-back, run once.
-                currentHighlighter.apply(text)
-                return
-            }
+            if (layout == null || layout.lineCount == 0) return  // try again next frame
             val top = editText.scrollY
             val bottom = top + editText.height
             val firstLine = layout.getLineForVertical(top)
@@ -3518,13 +3525,17 @@ class MainActivity : AppCompatActivity() {
             val endLine = (lastLine + bufferLines).coerceAtMost(layout.lineCount - 1)
             val rangeStart = layout.getLineStart(startLine)
             val rangeEnd = layout.getLineEnd(endLine)
-            currentHighlighter.apply(text, rangeStart, rangeEnd)
+            currentHighlighter.applyTokens(text, cachedTokens, rangeStart, rangeEnd)
+        }
+        fun rebuildAndApply() {
+            ensureTokenCache()
+            applyVisible()
         }
         val rehighlightHandler = android.os.Handler(android.os.Looper.getMainLooper())
         var rehighlightToken: Runnable? = null
-        fun scheduleRehighlight(delayMs: Long = 180L) {
+        fun scheduleRebuild(delayMs: Long) {
             rehighlightToken?.let { rehighlightHandler.removeCallbacks(it) }
-            val r = Runnable { rehighlightVisible() }
+            val r = Runnable { rebuildAndApply() }
             rehighlightToken = r
             rehighlightHandler.postDelayed(r, delayMs)
         }
@@ -3533,23 +3544,13 @@ class MainActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: android.text.Editable?) {
                 updateCharCount()
-                scheduleRehighlight()
+                scheduleRebuild(180L) // typing debounce
             }
         })
-        // Throttled scroll re-highlight — fires immediately if it's been >80ms
-        // since the last apply, otherwise queues for the remaining time. Keeps
-        // colouring up *during* a fling instead of only after it stops.
-        var lastScrollApplyMs = 0L
-        editText.onVerticalScrollChanged = {
-            val now = android.os.SystemClock.uptimeMillis()
-            if (now - lastScrollApplyMs >= 80L) {
-                lastScrollApplyMs = now
-                rehighlightToken?.let { rehighlightHandler.removeCallbacks(it) }
-                rehighlightVisible()
-            } else {
-                scheduleRehighlight(80L)
-            }
-        }
+        // Scroll handler: just re-apply from the cached tokens. No regex on
+        // the scroll path, so this is fast enough to run on every event with
+        // no throttling — colour follows the scroll smoothly without bumps.
+        editText.onVerticalScrollChanged = { applyVisible() }
 
         langBtn.setOnClickListener {
             val items = SyntaxHighlighters.all.map { it.displayName }.toTypedArray()
@@ -3559,7 +3560,7 @@ class MainActivity : AppCompatActivity() {
                 .setSingleChoiceItems(items, currentIdx) { d, which ->
                     currentHighlighter = SyntaxHighlighters.all[which]
                     langBtn.setTextColor(if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) ASH else COPPER_BRIGHT)
-                    rehighlightVisible()
+                    rebuildAndApply()
                     d.dismiss()
                 }
                 .setNegativeButton("Cancel", null)
