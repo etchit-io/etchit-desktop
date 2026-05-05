@@ -104,7 +104,7 @@
       <summary class="section-title-summary">Settings <span class="info" data-tip="Per-wallet, persisted in this app's local storage. Bootstrap peers and indexer URL are also configurable on mobile.">i</span></summary>
 
       <details class="settings-block">
-        <summary>Etch history</summary>
+        <summary>Etch history <span class="info" data-tip="Local list of your past public etches on this device. Use it to copy an old address or add one to chain/it. No setup, no cost.">i</span></summary>
         <p class="sub">Local list of etches made on this device. Newest first.</p>
         <div id="historyList"></div>
         <div class="controls" style="margin-top: 12px;">
@@ -114,7 +114,7 @@
       </details>
 
       <details class="settings-block">
-        <summary>Back up private etches</summary>
+        <summary>Back up private etches <span class="info" data-tip="Encrypts every private etch on this device with a passphrase, then etches the blob to the network so you can restore on another device. Use after making private etches you'd hate to lose. Needs a connected wallet + a small ANT cost. One passphrase per wallet — set it once, write it down.">i</span></summary>
         <p class="sub">
           Encrypts your private etch list with a passphrase, then etches it to the network for cross-device recovery (or download as a file). One passphrase per wallet — set it once, write it down, every future backup reuses it automatically.
         </p>
@@ -158,7 +158,7 @@
       </details>
 
       <details class="settings-block">
-        <summary>Restore private etches from a backup</summary>
+        <summary>Restore private etches from a backup <span class="info" data-tip="Decrypts a backup blob (by network address or local file) back into private etches on this device. Use on a fresh install or after a wipe. Needs the backup address (or file) and the 6-word passphrase you set when you backed up.">i</span></summary>
         <p class="sub">From a previous backup made with the same password — either etched to the network (paste the address) or saved to a file (pick the file).</p>
         <label for="restoreAddr">Backup address (64 hex)</label>
         <input id="restoreAddr" type="text" autocomplete="off" spellcheck="false" placeholder="64 hex characters" />
@@ -179,7 +179,7 @@
       </details>
 
       <details class="settings-block">
-        <summary>Chainmark key — backup / restore</summary>
+        <summary>Chainmark key — backup / restore <span class="info" data-tip="The 32-byte AES key that decrypts your chain/it list. Auto-derived from a wallet signature — most users never touch this. Back up the hex if you want to read chainmarks without the wallet (e.g. via the web viewer); paste a saved hex to restore the cached key on this device.">i</span></summary>
         <p class="sub">The 32-byte AES key derived from your wallet. Shared across mobile + desktop + web viewer for the same wallet. Anyone with this key plus your wallet address can read your chainmarks.</p>
         <div class="controls" style="margin-top: 6px;">
           <button id="showChainmarkKeyBtn">Show chainmark key</button>
@@ -190,7 +190,7 @@
       </details>
 
       <details class="settings-block" id="manualSection">
-        <summary>Decode chain/it with a manually-entered key</summary>
+        <summary>Decode chain/it with a manually-entered key <span class="info" data-tip="Read-only chain/it view without connecting a wallet. Useful from a borrowed device or when wallet signing isn't available. Needs your wallet address + the 64-hex chainmark key (from the backup section above, or the mobile app).">i</span></summary>
         <p class="sub">Fallback for when a wallet sign isn't available — paste the wallet address and 64-hex chainmark key directly.</p>
         <label for="wallet">Wallet address</label>
         <input id="wallet" type="text" placeholder="0x… (40 hex chars)" autocomplete="off" spellcheck="false" />
@@ -208,7 +208,7 @@
 
 
        <details class="settings-block">
-        <summary>Bootstrap peers</summary>
+        <summary>Bootstrap peers <span class="info" data-tip="Initial Autonomi peers used at startup to find the rest of the network. Defaults work. Only edit if connections keep failing and you have a known-good list of replacements.">i</span></summary>
         <p class="sub">One peer per line. Format: <code>ip:port</code> or full multiaddr. Leave empty to use the default Autonomi mainnet list. Saving reconnects.</p>
         <textarea id="bootstrapPeers" rows="6" placeholder="207.148.94.42:10000&#10;45.77.50.10:10000&#10;…"></textarea>
         <div class="controls" style="margin-top: 12px;">
@@ -219,7 +219,7 @@
       </details>
 
       <details class="settings-block">
-        <summary>Chainmark indexer</summary>
+        <summary>Chainmark indexer <span class="info" data-tip="Arbitrum block-explorer API used to find your chain/it transactions for sync. Default is keyless BlockScout. Only edit if it's down or you prefer a different (Etherscan-V1-compatible) indexer.">i</span></summary>
         <p class="sub">Etherscan-V1-compatible base URL. Default is keyless BlockScout.</p>
         <input id="indexer" type="text" value="https://arbitrum.blockscout.com/api" autocomplete="off" spellcheck="false" />
         <div class="controls" style="margin-top: 12px;">
@@ -229,7 +229,7 @@
       </details>
 
       <details class="settings-block">
-        <summary>Terms</summary>
+        <summary>Terms <span class="info" data-tip="The legal as-is text. Beta software. You own what you etch. No recovery for lost wallets or passphrases. Read once.">i</span></summary>
         <pre id="termsText" class="terms-text"></pre>
       </details>
 
