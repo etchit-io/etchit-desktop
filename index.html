@@ -44,18 +44,16 @@
 
       <section class="etch-panel">
         <h2>Create an etch <span class="info" data-tip="Wallet required. Public is readable by anyone with the address; private stays on this device, encrypted with your wallet key.">i</span></h2>
-        <label for="etchTitle">Title (optional)</label>
-        <input id="etchTitle" type="text" placeholder="e.g. release notes" autocomplete="off" />
-        <div class="label-row">
-          <label for="etchText">Content</label>
-          <button id="attachBtn" type="button" class="attach-btn" title="Attach text file">
+        <div class="title-row">
+          <input id="etchTitle" type="text" placeholder="title" autocomplete="off" aria-label="Title" />
+          <button id="attachBtn" type="button" class="attach-btn" title="Attach text file" aria-label="Attach text file">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.99 8.84L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
             </svg>
           </button>
           <input id="attachFileInput" type="file" accept="text/*,.txt,.md,.json,.xml,.yml,.yaml,.toml,.csv,.log,.html,.css,.js,.ts,.py,.rs,.go,.kt,.java,.c,.cpp,.h" hidden />
         </div>
-        <textarea id="etchText" rows="6" placeholder="Paste text here. Multi-line is fine."></textarea>
+        <textarea id="etchText" rows="6" placeholder="etch here..." aria-label="Content"></textarea>
         <div class="fs-hint">double-click to expand</div>
         <label class="checkbox">
           <input id="etchPrivate" type="checkbox" />

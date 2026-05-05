@@ -689,6 +689,19 @@ h2 {
 
 .label-row label { margin: 0; }
 
+/* Title input + attach button on one row, no separate label. Mirrors the
+   mobile layout where the title row owns the attach button and content
+   below relies on its placeholder. */
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+.title-row input[type=text] { flex: 1; }
+.title-row .attach-btn { flex: 0 0 auto; }
+
 .attach-btn {
   background: transparent;
   border: none;
