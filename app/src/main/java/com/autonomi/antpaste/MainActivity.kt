@@ -3492,30 +3492,39 @@ class MainActivity : AppCompatActivity() {
             charCount.text = String.format(java.util.Locale.US, "%,d", n)
         }
         updateCharCount()
-        // Token cache — populated once per text change (or language change),
-        // reused on every scroll. Keeps the regex pass off the scroll path,
-        // so scroll-time work is just clear() + a small number of setSpan
-        // calls for tokens in the visible range.
+        // Token cache + diff-based span tracker.
+        //
+        // The naive "clear all + reapply" approach was O(n²) per scroll event
+        // because removeSpan does an internal array shift on Android's
+        // Spannable, costing ~16ms at typical span counts and burning frames.
+        // This tracker keeps a map of (token index → live span objects) and
+        // only mutates the diff as the visible range slides — outgoing tokens
+        // get removeSpan, newcomers get setSpan. Scroll-time work scales with
+        // the size of the delta, not the size of the doc.
         var cachedTokens: List<HighlightToken> = emptyList()
         var cachedForLang: SyntaxHighlighter? = null
-        var cachedForTextHash: Int = 0
+        var cacheValid = false
+        val appliedSpans = HashMap<Int, Array<Any>>() // tokenIdx → live spans
+
+        fun resetAppliedSpans() {
+            val text = editText.text ?: return
+            for (spans in appliedSpans.values) for (s in spans) text.removeSpan(s)
+            appliedSpans.clear()
+        }
         fun ensureTokenCache() {
             val text = editText.text ?: return
-            val hash = text.toString().hashCode()
-            if (currentHighlighter === cachedForLang && hash == cachedForTextHash) return
             cachedTokens = if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) emptyList()
                            else currentHighlighter.tokenize(text)
             cachedForLang = currentHighlighter
-            cachedForTextHash = hash
+            cacheValid = true
         }
         fun applyVisible() {
             val text = editText.text ?: return
-            if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) {
-                SyntaxHighlighters.clear(text)
-                return
-            }
+            if (!cacheValid) return  // cache stale — wait for rebuild before painting
+            if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) return
             val layout = editText.layout
-            if (layout == null || layout.lineCount == 0) return  // try again next frame
+            if (layout == null || layout.lineCount == 0) return
+
             val top = editText.scrollY
             val bottom = top + editText.height
             val firstLine = layout.getLineForVertical(top)
@@ -3525,9 +3534,46 @@ class MainActivity : AppCompatActivity() {
             val endLine = (lastLine + bufferLines).coerceAtMost(layout.lineCount - 1)
             val rangeStart = layout.getLineStart(startLine)
             val rangeEnd = layout.getLineEnd(endLine)
-            currentHighlighter.applyTokens(text, cachedTokens, rangeStart, rangeEnd)
+
+            // Compute target set: tokens whose extent overlaps [rangeStart, rangeEnd).
+            val target = HashSet<Int>()
+            for (i in cachedTokens.indices) {
+                val t = cachedTokens[i]
+                if (t.end > rangeStart && t.start < rangeEnd) target.add(i)
+            }
+
+            // Outgoing tokens (currently spanned but no longer in range): remove.
+            val iter = appliedSpans.entries.iterator()
+            while (iter.hasNext()) {
+                val (idx, spans) = iter.next()
+                if (idx !in target) {
+                    for (s in spans) text.removeSpan(s)
+                    iter.remove()
+                }
+            }
+            // Incoming tokens (in range but not yet spanned): add.
+            for (idx in target) {
+                if (idx in appliedSpans) continue
+                val t = cachedTokens[idx]
+                val end = t.end.coerceAtMost(text.length)
+                val start = t.start.coerceAtMost(end)
+                if (start >= end) continue
+                val list = mutableListOf<Any>()
+                if (t.color != -1) {
+                    val s = android.text.style.ForegroundColorSpan(t.color)
+                    text.setSpan(s, start, end, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    list += s
+                }
+                if (t.style != -1) {
+                    val s = android.text.style.StyleSpan(t.style)
+                    text.setSpan(s, start, end, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    list += s
+                }
+                appliedSpans[idx] = list.toTypedArray()
+            }
         }
         fun rebuildAndApply() {
+            resetAppliedSpans()       // old cache's token indices won't match new tokens
             ensureTokenCache()
             applyVisible()
         }
@@ -3544,12 +3590,17 @@ class MainActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: android.text.Editable?) {
                 updateCharCount()
-                scheduleRebuild(180L) // typing debounce
+                // Cache + applied spans are now stale. Clear them now (no
+                // wrong-position spans showing during the debounce) and rebuild
+                // after the user stops typing.
+                cacheValid = false
+                resetAppliedSpans()
+                scheduleRebuild(180L)
             }
         })
-        // Scroll handler: just re-apply from the cached tokens. No regex on
-        // the scroll path, so this is fast enough to run on every event with
-        // no throttling — colour follows the scroll smoothly without bumps.
+        // Scroll handler: diff-only update from cached tokens. Trivially fast
+        // for small scroll deltas — typically a few dozen setSpan/removeSpan
+        // calls per frame, well under one frame budget.
         editText.onVerticalScrollChanged = { applyVisible() }
 
         langBtn.setOnClickListener {
