@@ -3249,22 +3249,23 @@ class MainActivity : AppCompatActivity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(INK_2)
+            setBackgroundColor(INK)
             fitsSystemWindows = true
         }
 
-        // ── Top bar ── (✕ close · optional title · Save)
+        // ── Top bar ── ← back · optional title · char count · Save
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setBackgroundColor(INK)
+            setBackgroundColor(INK_2)
+            elevation = 4 * dp
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 (56 * dp).toInt(),
             )
         }
         val closeBtn = android.widget.ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            setImageResource(android.R.drawable.ic_menu_revert)
             setColorFilter(BONE)
             background = null
             setPadding(pad12, pad12, pad12, pad12)
@@ -3280,6 +3281,7 @@ class MainActivity : AppCompatActivity() {
                 text = title
                 setTextColor(BONE)
                 textSize = 15f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding(pad12, 0, pad12, 0)
@@ -3290,28 +3292,53 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
             })
         }
+        // Live character count — quietly tracks the typed text. Useful when
+        // you're padding out toward a length target or just curious about
+        // how long the etch will be.
+        val charCount = TextView(this).apply {
+            setTextColor(ASH)
+            textSize = 12f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(0, 0, pad12, 0)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+        }
+        toolbar.addView(charCount)
         val saveBtn = TextView(this).apply {
             text = "Save"
             setTextColor(COPPER_BRIGHT)
             textSize = 14f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.04f
             setPadding(pad16, pad12, pad16, pad12)
             isClickable = true
             isFocusable = true
             contentDescription = "Save as file"
-            background = android.content.res.ColorStateList.valueOf(0).let { null }
         }
         toolbar.addView(saveBtn)
         root.addView(toolbar)
 
-        // ── Editor body ── edge-to-edge EditText filling the rest
+        // 1dp copper-dim hairline under the toolbar — a single brand line
+        // separating chrome from writing surface.
+        root.addView(View(this).apply {
+            setBackgroundColor(0xFF8a4e1d.toInt()) // copper-dim
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                Math.max(1, (1 * dp).toInt()),
+            )
+        })
+
+        // ── Editor body ── breathable padding, generous line-height
         val editText = EditText(this).apply {
             setText(initialText)
             setTextColor(BONE)
             setHintTextColor(ASH)
-            textSize = 14f
+            textSize = 15f
             typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(pad16, pad16, pad16, pad16)
+            setLineSpacing(0f, 1.6f)
+            setPadding((24 * dp).toInt(), (28 * dp).toInt(), (24 * dp).toInt(), (24 * dp).toInt())
             gravity = android.view.Gravity.TOP or android.view.Gravity.START
             setBackgroundColor(0)
             layoutParams = LinearLayout.LayoutParams(
@@ -3336,6 +3363,18 @@ class MainActivity : AppCompatActivity() {
             }
         }
         root.addView(editText)
+
+        // Bind char-count to the EditText — formatted with thousands separator.
+        fun updateCharCount() {
+            val n = editText.text.length
+            charCount.text = String.format(java.util.Locale.US, "%,d", n)
+        }
+        updateCharCount()
+        editText.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { updateCharCount() }
+        })
 
         dialog.setContentView(root)
         dialog.window?.apply {
