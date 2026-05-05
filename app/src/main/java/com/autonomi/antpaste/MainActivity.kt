@@ -2428,10 +2428,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         layout.addView(TextView(this).apply {
-            text = "Choose a passphrase to encrypt your $entryCount private etch${if (entryCount > 1) "es" else ""}. " +
-                "You'll need it to restore on any device. " +
-                "Reuse it across devices, or create a fresh passphrase for each backup. " +
-                "Every future backup on this device reuses it automatically."
+            text = "Choose a passphrase. Reuse it across devices, or pick a fresh one each time. " +
+                "You'll need it to restore."
             setTextColor(BONE)
         })
 
