@@ -465,7 +465,7 @@ class MainActivity : AppCompatActivity() {
         val contentInputGd = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
                 showFullScreenTextDialog(
-                    title = "Edit etch content",
+                    title = "",
                     initialText = binding.contentInput.text.toString(),
                     editable = true,
                     onCommit = { newText ->
@@ -3271,9 +3271,9 @@ class MainActivity : AppCompatActivity() {
             if (editable) setSelection(initialText.length)
         }
 
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(title)
-            .setView(editText)
+        val builder = AlertDialog.Builder(this).setView(editText)
+        if (title.isNotBlank()) builder.setTitle(title)
+        val dialog = builder
             .setPositiveButton(if (editable) "Done" else "Close") { _, _ ->
                 if (editable) onCommit?.invoke(editText.text.toString())
             }
