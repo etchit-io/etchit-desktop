@@ -156,6 +156,188 @@ input[type=text]:focus, input[type=password]:focus {
   text-transform: uppercase;
 }
 
+/* ── Fullscreen editor overlay ────────────────────────────────────── */
+.fs-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--ink);
+  color: var(--bone);
+  display: flex;
+  flex-direction: column;
+  animation: fs-editor-in 120ms ease-out;
+}
+@keyframes fs-editor-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.fs-editor-bar {
+  display: flex;
+  align-items: center;
+  height: 56px;
+  padding: 0 8px;
+  background: var(--ink-2);
+  border-bottom: 1px solid var(--copper-dim);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
+}
+
+.fs-editor-close {
+  background: none;
+  border: none;
+  color: var(--bone);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 8px 16px;
+  line-height: 1;
+  height: 100%;
+}
+.fs-editor-close:hover { color: var(--copper); }
+
+.fs-editor-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--bone);
+  padding: 0 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-editor-spacer { flex: 1; }
+
+.fs-editor-chars {
+  color: var(--ash);
+  font-size: 12px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  padding: 0 12px;
+  user-select: none;
+}
+
+.fs-editor-lang {
+  background: var(--ink-3);
+  color: var(--bone);
+  border: 1px solid #2a2a2a;
+  font: inherit;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  padding: 4px 8px;
+  margin-right: 8px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.fs-editor-lang:hover { border-color: var(--copper); }
+.fs-editor-lang:focus { outline: 0; border-color: var(--copper); }
+
+.fs-editor-save {
+  background: none;
+  border: none;
+  color: var(--copper);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  padding: 8px 16px;
+  cursor: pointer;
+  height: 100%;
+}
+.fs-editor-save:hover { color: var(--copper-bright); }
+
+.fs-editor-area {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+  min-height: 0;
+}
+
+/* Source-line gutter — collapsed in Plain mode, visible for code. */
+.fs-editor-gutter {
+  flex: 0 0 0px;
+  width: 0;
+  padding: 28px 0 24px 0;
+  text-align: right;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #6a6a6a;
+  white-space: pre;
+  overflow: hidden;
+  user-select: none;
+  background: transparent;
+  line-height: 1.6;
+  transition: flex-basis 100ms ease, width 100ms ease;
+}
+.fs-editor-gutter.fs-gutter-on {
+  flex: 0 0 48px;
+  width: 48px;
+  padding-right: 10px;
+}
+
+.fs-editor-content {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.fs-editor-highlight,
+.fs-editor-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 28px 24px 24px 24px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 15px;
+  line-height: 1.6;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  word-break: normal;
+  border: none;
+  outline: none;
+  background: transparent;
+  tab-size: 4;
+}
+.fs-editor-content.fs-no-wrap .fs-editor-highlight,
+.fs-editor-content.fs-no-wrap .fs-editor-input {
+  white-space: pre;
+  word-wrap: normal;
+  overflow-x: auto;
+}
+
+.fs-editor-highlight {
+  pointer-events: none;
+  color: var(--bone);
+  overflow: hidden;
+  z-index: 1;
+}
+.fs-editor-highlight.fs-readonly {
+  pointer-events: auto;
+  user-select: text;
+  overflow: auto;
+  z-index: 2;
+}
+
+.fs-editor-input {
+  color: transparent;
+  caret-color: var(--copper);
+  resize: none;
+  z-index: 2;
+  overflow: auto;
+}
+.fs-editor-input::selection {
+  background: rgba(201, 115, 43, 0.3);
+  color: transparent;
+}
+
+/* Hint on the etch input that double-click expands. */
+.fs-hint {
+  font-size: 11px;
+  color: var(--ash);
+  margin-top: 4px;
+  font-style: italic;
+}
+
 button {
   padding: 10px 18px;
   background: var(--copper);

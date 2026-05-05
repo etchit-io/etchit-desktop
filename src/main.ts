@@ -12,6 +12,7 @@ import { arbitrum } from "@reown/appkit/networks";
 import { Interface, JsonRpcProvider, type Eip1193Provider } from "ethers";
 import { BIP39_WORDLIST } from "./wordlist-bip39";
 import { LANGUAGES, highlightAs } from "./syntaxHighlight";
+import { openFullscreenEditor } from "./fullscreenEditor";
 
 // EVM constants — match BuildConfig in etchit-android-v3/app/build.gradle.kts.
 const ARBITRUM_RPC = "https://arb1.arbitrum.io/rpc";
@@ -1965,6 +1966,19 @@ async function fetchPrivateEntry(id: string): Promise<{ data: Uint8Array; title:
 // MAX_ATTACHMENT_BYTES limits and behavior: validates UTF-8, loads
 // content into the textarea, auto-fills title from filename if empty.
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+// Double-click the etch textarea to open the premium fullscreen editor
+// (syntax highlighting, line gutter for code, save-as-file). Edits commit
+// back into the textarea on close.
+$("etchText").addEventListener("dblclick", () => {
+  const ta = $<HTMLTextAreaElement>("etchText");
+  if (ta.disabled) return;
+  openFullscreenEditor({
+    initialText: ta.value,
+    editable: true,
+    onCommit: (text) => { ta.value = text; },
+  });
+});
 
 $("attachBtn").addEventListener("click", () => $<HTMLInputElement>("attachFileInput").click());
 $("attachFileInput").addEventListener("change", async (ev) => {
