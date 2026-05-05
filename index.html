@@ -114,44 +114,41 @@
       </details>
 
       <details class="settings-block">
-        <summary>Bootstrap peers</summary>
-        <p class="sub">One peer per line. Format: <code>ip:port</code> or full multiaddr. Leave empty to use the default Autonomi mainnet list. Saving reconnects.</p>
-        <textarea id="bootstrapPeers" rows="6" placeholder="207.148.94.42:10000&#10;45.77.50.10:10000&#10;…"></textarea>
-        <div class="controls" style="margin-top: 12px;">
-          <button id="savePeersBtn">Save and reconnect</button>
-          <button id="resetPeersBtn" class="outlined">Reset to defaults</button>
-          <span id="peersStatus" class="status"></span>
-        </div>
-      </details>
-
-      <details class="settings-block">
-        <summary>Chainmark indexer</summary>
-        <p class="sub">Etherscan-V1-compatible base URL. Default is keyless BlockScout.</p>
-        <input id="indexer" type="text" value="https://arbitrum.blockscout.com/api" autocomplete="off" spellcheck="false" />
-        <div class="controls" style="margin-top: 12px;">
-          <button id="saveIndexerBtn">Save</button>
-          <span id="indexerStatus" class="status"></span>
-        </div>
-      </details>
-
-      <details class="settings-block">
         <summary>Back up private etches</summary>
         <p class="sub">
-          Encrypts your private etch list with a password. Etch it to the network for cross-device recovery, or download it as a file to keep on a USB / cloud / wherever you trust.
+          Encrypts your private etch list with a passphrase, then etches it to the network for cross-device recovery (or download as a file). One passphrase per wallet — set it once, write it down, every future backup reuses it automatically.
         </p>
-        <div class="controls" style="margin-top: 8px; margin-bottom: 0;">
-          <button id="generatePassphraseBtn" class="outlined">Generate strong passphrase</button>
-          <span class="status" style="color: var(--ash); margin-top: 0;">recommended — 6 BIP-39 words, ~66 bits entropy</span>
+
+        <!-- Shown when there's a cached passphrase for this wallet. -->
+        <div id="backupCachedBlock" style="display: none; margin-top: 8px;">
+          <div style="padding: 10px 14px; background: var(--ink-3); border-left: 3px solid var(--copper); border-radius: 4px; font-size: 13px; line-height: 1.6;">
+            <strong style="color: var(--copper);">Recovery passphrase set</strong> for this wallet. New backups encrypt with the same passphrase you wrote down.
+            <div style="margin-top: 6px;">
+              <a id="showCachedPassphraseLink" href="#" style="color: var(--copper); text-decoration: underline; font-size: 12px;">Show passphrase</a>
+              <span style="color: var(--ash); margin: 0 8px;">·</span>
+              <a id="useDifferentPassphraseLink" href="#" style="color: var(--copper); text-decoration: underline; font-size: 12px;">Use a different passphrase</a>
+            </div>
+            <div id="cachedPassphraseReveal" style="display: none; margin-top: 10px; padding: 10px 12px; background: var(--ink); border-radius: 4px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; color: var(--bone);"></div>
+          </div>
         </div>
-        <label for="backupPassword">Password (or generated passphrase)</label>
-        <input id="backupPassword" type="password" autocomplete="new-password" placeholder="At least 8 characters" />
-        <div id="backupPwStrength" class="status" style="display: block; margin-top: 4px;"></div>
-        <label for="backupPasswordConfirm" style="margin-top: 12px;">Confirm password</label>
-        <input id="backupPasswordConfirm" type="password" autocomplete="new-password" />
-        <label class="checkbox" style="margin-top: 14px;">
-          <input id="backupPasswordSaved" type="checkbox" />
-          <span>I have saved this password somewhere safe. <strong>There is no recovery if I lose it.</strong></span>
-        </label>
+
+        <!-- First-backup form. Hidden when a cached passphrase exists. -->
+        <div id="backupSetupBlock">
+          <div class="controls" style="margin-top: 8px; margin-bottom: 0;">
+            <button id="generatePassphraseBtn" class="outlined">Generate strong passphrase</button>
+            <span class="status" style="color: var(--ash); margin-top: 0;">recommended — 6 BIP-39 words, ~66 bits entropy</span>
+          </div>
+          <label for="backupPassword">Passphrase</label>
+          <input id="backupPassword" type="password" autocomplete="new-password" placeholder="6-word passphrase or 8+ character password" />
+          <div id="backupPwStrength" class="status" style="display: block; margin-top: 4px;"></div>
+          <label for="backupPasswordConfirm" style="margin-top: 12px;">Confirm</label>
+          <input id="backupPasswordConfirm" type="password" autocomplete="new-password" />
+          <label class="checkbox" style="margin-top: 14px;">
+            <input id="backupPasswordSaved" type="checkbox" />
+            <span>I have saved this passphrase somewhere safe. <strong>There is no recovery if I lose it.</strong></span>
+          </label>
+        </div>
+
         <div class="controls" style="margin-top: 12px;">
           <button id="createBackupBtn">Etch to network</button>
           <button id="downloadBackupBtn" class="outlined">Download as file</button>
@@ -205,6 +202,29 @@
         </div>
         <div class="controls" style="margin-top: 12px;">
           <button id="decodeManual">Decode chain/it</button>
+        </div>
+      </details>
+
+
+
+       <details class="settings-block">
+        <summary>Bootstrap peers</summary>
+        <p class="sub">One peer per line. Format: <code>ip:port</code> or full multiaddr. Leave empty to use the default Autonomi mainnet list. Saving reconnects.</p>
+        <textarea id="bootstrapPeers" rows="6" placeholder="207.148.94.42:10000&#10;45.77.50.10:10000&#10;…"></textarea>
+        <div class="controls" style="margin-top: 12px;">
+          <button id="savePeersBtn">Save and reconnect</button>
+          <button id="resetPeersBtn" class="outlined">Reset to defaults</button>
+          <span id="peersStatus" class="status"></span>
+        </div>
+      </details>
+
+      <details class="settings-block">
+        <summary>Chainmark indexer</summary>
+        <p class="sub">Etherscan-V1-compatible base URL. Default is keyless BlockScout.</p>
+        <input id="indexer" type="text" value="https://arbitrum.blockscout.com/api" autocomplete="off" spellcheck="false" />
+        <div class="controls" style="margin-top: 12px;">
+          <button id="saveIndexerBtn">Save</button>
+          <span id="indexerStatus" class="status"></span>
         </div>
       </details>
 

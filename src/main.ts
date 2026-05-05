@@ -1213,6 +1213,48 @@ async function decryptDataMap(storageKey: Uint8Array, cipherHex: string): Promis
   }
 }
 
+// ── Backup-passphrase cache ────────────────────────────────────────
+//
+// One backup passphrase per wallet, stored encrypted-at-rest under the
+// wallet's storage key (same key that protects private data maps). The
+// passphrase still exists on paper / in a password manager — this is a
+// convenience cache so the user doesn't re-type or re-generate a fresh
+// passphrase for every backup. Cache lifetime is the localStorage's
+// lifetime; deleting browser storage just means re-typing the passphrase
+// the next time the user backs up (or does a network restore).
+function cachedBackupPassphraseStoreKey(wallet: string): string {
+  return `etchit-backup-passphrase-cache:${wallet.toLowerCase()}`;
+}
+function hasCachedBackupPassphrase(wallet: string): boolean {
+  return localStorage.getItem(cachedBackupPassphraseStoreKey(wallet)) !== null;
+}
+async function loadCachedBackupPassphrase(wallet: string, storageKey: Uint8Array): Promise<string | null> {
+  const cipherHex = localStorage.getItem(cachedBackupPassphraseStoreKey(wallet));
+  if (!cipherHex) return null;
+  const blob = hexToBytes(cipherHex);
+  if (blob.length < 12 + 16) return null;
+  const nonce = blob.slice(0, 12);
+  const ct = blob.slice(12);
+  const aesKey = await crypto.subtle.importKey("raw", storageKey, { name: "AES-GCM" }, false, ["decrypt"]);
+  try {
+    const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce }, aesKey, ct));
+    return new TextDecoder().decode(pt);
+  } catch {
+    return null;
+  }
+}
+async function saveCachedBackupPassphrase(wallet: string, storageKey: Uint8Array, passphrase: string): Promise<void> {
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const aesKey = await crypto.subtle.importKey("raw", storageKey, { name: "AES-GCM" }, false, ["encrypt"]);
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, aesKey, new TextEncoder().encode(passphrase)),
+  );
+  localStorage.setItem(cachedBackupPassphraseStoreKey(wallet), bytesToHex(nonce) + bytesToHex(ct));
+}
+function clearCachedBackupPassphrase(wallet: string): void {
+  localStorage.removeItem(cachedBackupPassphraseStoreKey(wallet));
+}
+
 // ── Etch history (Phase 3d) ──────────────────────────────────────
 //
 // Per-wallet local list of etches made on this device. Mirrors
@@ -2551,30 +2593,52 @@ function initSettingsUI(): void {
     pwConfirmInput.parentElement?.insertBefore(panel, pwConfirmInput.nextSibling);
   });
 
-  // Validates the password fields and saved-confirmation checkbox; on
-  // success returns {plaintext, entries, encrypted} ready to be either
-  // etched or saved to disk. Sets status on failure and returns null.
-  async function prepareBackupBlob(): Promise<{ encrypted: Uint8Array; entries: number } | null> {
-    const pw = pwInput.value;
-    const pwConfirm = pwConfirmInput.value;
-    const savedCheckbox = $<HTMLInputElement>("backupPasswordSaved");
-    if (pw.length < MIN_BACKUP_PASSWORD_LEN) {
-      setBackupStatus(`Password too short (min ${MIN_BACKUP_PASSWORD_LEN}).`, "err"); return null;
+  // Validates the passphrase fields and saved-confirmation checkbox; on
+  // success returns {encrypted, entries, passphrase} ready to be either
+  // etched or saved to disk. If the wallet already has a cached passphrase,
+  // skips the form and uses the cached value (one passphrase per wallet —
+  // the user only writes it down once).
+  async function prepareBackupBlob(): Promise<{ encrypted: Uint8Array; entries: number; passphrase: string } | null> {
+    const wallet = knownWallet();
+    let passphrase: string | null = null;
+
+    if (wallet && hasCachedBackupPassphrase(wallet)) {
+      setBackupStatus("Unlocking your recovery passphrase…", "warn");
+      try {
+        const { key } = await ensureStorageKey();
+        passphrase = await loadCachedBackupPassphrase(wallet, key);
+      } catch (e) {
+        setBackupStatus(`Couldn't unlock cached passphrase: ${(e as Error).message ?? String(e)}`, "err");
+        return null;
+      }
+      if (!passphrase) {
+        setBackupStatus("Cached passphrase couldn't be decrypted — click 'Use a different passphrase' to reset.", "err");
+        return null;
+      }
+    } else {
+      const pw = pwInput.value;
+      const pwConfirm = pwConfirmInput.value;
+      const savedCheckbox = $<HTMLInputElement>("backupPasswordSaved");
+      if (pw.length < MIN_BACKUP_PASSWORD_LEN) {
+        setBackupStatus(`Passphrase too short (min ${MIN_BACKUP_PASSWORD_LEN}).`, "err"); return null;
+      }
+      if (pw !== pwConfirm) {
+        setBackupStatus("Passphrases don't match.", "err"); return null;
+      }
+      if (!savedCheckbox.checked) {
+        setBackupStatus("Confirm you've saved the passphrase somewhere safe.", "err"); return null;
+      }
+      passphrase = pw;
     }
-    if (pw !== pwConfirm) {
-      setBackupStatus("Passwords don't match.", "err"); return null;
-    }
-    if (!savedCheckbox.checked) {
-      setBackupStatus("Confirm you've saved the password somewhere safe.", "err"); return null;
-    }
+
     setBackupStatus("Building plaintext…", "warn");
     const { plaintext, entries } = await buildBackupPlaintext();
     if (entries === 0) {
       setBackupStatus("No private etches to back up.", "err"); return null;
     }
     setBackupStatus(`Encrypting ${entries} entr${entries === 1 ? "y" : "ies"}…`, "warn");
-    const encrypted = await backupEncrypt(plaintext, pw);
-    return { encrypted, entries };
+    const encrypted = await backupEncrypt(plaintext, passphrase);
+    return { encrypted, entries, passphrase };
   }
 
   function clearBackupForm(): void {
@@ -2584,6 +2648,59 @@ function initSettingsUI(): void {
     pwStrengthEl.className = "status";
     $<HTMLInputElement>("backupPasswordSaved").checked = false;
   }
+
+  // Cache the passphrase that was just used for a successful backup,
+  // so subsequent backups silently reuse it. No-op if already cached.
+  async function maybeCacheBackupPassphrase(passphrase: string): Promise<void> {
+    const w = knownWallet();
+    if (!w || hasCachedBackupPassphrase(w)) return;
+    try {
+      const { key } = await ensureStorageKey();
+      await saveCachedBackupPassphrase(w, key, passphrase);
+      refreshBackupCacheUI();
+    } catch {
+      // Caching failed — backup still succeeded; user just keeps typing.
+    }
+  }
+
+  $("showCachedPassphraseLink").addEventListener("click", async (e) => {
+    e.preventDefault();
+    const reveal = $("cachedPassphraseReveal");
+    if (reveal.style.display === "block") {
+      reveal.style.display = "none";
+      ($("showCachedPassphraseLink") as HTMLAnchorElement).textContent = "Show passphrase";
+      return;
+    }
+    const w = knownWallet();
+    if (!w) return;
+    try {
+      const { key } = await ensureStorageKey();
+      const phrase = await loadCachedBackupPassphrase(w, key);
+      if (!phrase) { reveal.textContent = "Couldn't decrypt cached passphrase."; reveal.style.display = "block"; return; }
+      reveal.textContent = phrase;
+      reveal.style.display = "block";
+      ($("showCachedPassphraseLink") as HTMLAnchorElement).textContent = "Hide passphrase";
+    } catch (err) {
+      reveal.textContent = `Failed to unlock: ${(err as Error).message ?? String(err)}`;
+      reveal.style.display = "block";
+    }
+  });
+
+  $("useDifferentPassphraseLink").addEventListener("click", (e) => {
+    e.preventDefault();
+    const w = knownWallet();
+    if (!w) return;
+    const ok = confirm(
+      "Use a different passphrase?\n\n" +
+      "Your current cached passphrase will be removed from this device. " +
+      "Existing backups encrypted with the old passphrase still decrypt with it (you'd need to remember both for those), " +
+      "and your next new backup will use whatever passphrase you pick now."
+    );
+    if (!ok) return;
+    clearCachedBackupPassphrase(w);
+    refreshBackupCacheUI();
+    setBackupStatus("Cached passphrase cleared. Pick a new one below.", "warn");
+  });
 
   $("createBackupBtn").addEventListener("click", async () => {
     const btn = $<HTMLButtonElement>("createBackupBtn");
@@ -2596,6 +2713,7 @@ function initSettingsUI(): void {
       const result = await uploadPublicBytes(prep.encrypted, "Backup", setBackupStatus);
       setBackupStatus("Done.", "ok");
       showBackupResultPanel(result.address, prep.entries);
+      await maybeCacheBackupPassphrase(prep.passphrase);
       clearBackupForm();
       const w = knownWallet();
       if (w) pushHistoryPublic(w, result.address, "Backup");
@@ -2622,6 +2740,7 @@ function initSettingsUI(): void {
       setBackupStatus("Writing file…", "warn");
       await invoke("save_bytes", { path, bytes: Array.from(prep.encrypted) });
       setBackupStatus(`Saved · ${prep.entries} entr${prep.entries === 1 ? "y" : "ies"} encrypted · ${path}`, "ok");
+      await maybeCacheBackupPassphrase(prep.passphrase);
       clearBackupForm();
     } catch (e) {
       setBackupStatus(`Failed: ${(e as Error).message ?? String(e)}`, "err");
@@ -2651,6 +2770,10 @@ function initSettingsUI(): void {
     const { imported, skipped } = await importBackupPlaintext(plaintext);
     setRestoreStatus(`Restored ${imported} new entr${imported === 1 ? "y" : "ies"}${skipped ? ` (skipped ${skipped} duplicate${skipped === 1 ? "" : "s"})` : ""}.`, "ok");
     restorePassphrase.clear();
+    // Cache the restore passphrase under this wallet so future backups on
+    // this device automatically reuse it — symmetric with the backup-side
+    // caching, and avoids forcing a second passphrase entry on a fresh device.
+    await maybeCacheBackupPassphrase(pw);
   }
 
   $("restoreBackupBtn").addEventListener("click", async () => {
@@ -2806,11 +2929,28 @@ function maybeRerenderPrivate(): void {
     lastRenderedWallet = wallet;
     renderPrivateEtches();
     renderHistory();
+    refreshBackupCacheUI();
   }
+}
+
+// Toggle between the cached-passphrase block and the first-time setup
+// form in the Backup section, based on whether localStorage has a
+// passphrase cached for the current wallet.
+function refreshBackupCacheUI(): void {
+  const cachedBlock = document.getElementById("backupCachedBlock");
+  const setupBlock = document.getElementById("backupSetupBlock");
+  const reveal = document.getElementById("cachedPassphraseReveal");
+  if (!cachedBlock || !setupBlock) return;
+  const w = knownWallet();
+  const hasCache = !!w && hasCachedBackupPassphrase(w);
+  cachedBlock.style.display = hasCache ? "block" : "none";
+  setupBlock.style.display = hasCache ? "none" : "block";
+  if (reveal) { reveal.style.display = "none"; reveal.textContent = ""; }
 }
 
 renderPrivateEtches();
 lastRenderedWallet = knownWallet();
+refreshBackupCacheUI();
 void refreshWalletBar();
 appKit.subscribeAccount(() => {
   void refreshWalletBar();
