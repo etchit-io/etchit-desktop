@@ -3330,15 +3330,23 @@ class MainActivity : AppCompatActivity() {
             )
         })
 
-        // ── Editor body ── breathable padding, generous line-height
-        val editText = EditText(this).apply {
+        // ── Editor body ── breathable padding, generous line-height,
+        // fine line-number gutter on the left.
+        val editText = LineNumberEditText(this).apply {
             setText(initialText)
             setTextColor(BONE)
             setHintTextColor(ASH)
             textSize = 15f
             typeface = android.graphics.Typeface.MONOSPACE
             setLineSpacing(0f, 1.6f)
-            setPadding((24 * dp).toInt(), (28 * dp).toInt(), (24 * dp).toInt(), (24 * dp).toInt())
+            // Left padding clears the gutter; right/top/bottom keep the
+            // breathable margins.
+            setPadding(
+                gutterWidthPx + (12 * dp).toInt(),
+                (28 * dp).toInt(),
+                (24 * dp).toInt(),
+                (24 * dp).toInt(),
+            )
             gravity = android.view.Gravity.TOP or android.view.Gravity.START
             setBackgroundColor(0)
             layoutParams = LinearLayout.LayoutParams(
