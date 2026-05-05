@@ -38,9 +38,19 @@ class LineNumberEditText @JvmOverloads constructor(
         val l = layout ?: return
         val txt = text ?: return
 
+        // The Layout coordinates are relative to the start of the text, but
+        // EditText draws the text starting at totalPaddingTop within the View.
+        // Add it so our gutter numbers land on the same baselines.
+        val padTop = totalPaddingTop.toFloat()
+
         // Line 1 is always at visual line 0.
         var srcNum = 1
-        canvas.drawText(srcNum.toString(), gutterRightX, l.getLineBaseline(0).toFloat(), gutterPaint)
+        canvas.drawText(
+            srcNum.toString(),
+            gutterRightX,
+            padTop + l.getLineBaseline(0).toFloat(),
+            gutterPaint,
+        )
         var lastVisualDrawn = 0
 
         // Each newline starts a new source line at the *next* offset.
@@ -56,7 +66,7 @@ class LineNumberEditText @JvmOverloads constructor(
                         canvas.drawText(
                             srcNum.toString(),
                             gutterRightX,
-                            l.getLineBaseline(visualLine).toFloat(),
+                            padTop + l.getLineBaseline(visualLine).toFloat(),
                             gutterPaint,
                         )
                         lastVisualDrawn = visualLine
