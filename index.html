@@ -43,7 +43,7 @@
       </div>
 
       <section class="etch-panel">
-        <h2>Create an etch <span class="info" data-tip="Wallet must be connected. Public etches: anyone with the address can fetch. Private etches: data-map stays on this device, encrypted with your wallet key.">i</span></h2>
+        <h2>Create an etch <span class="info" data-tip="Wallet required. Public is readable by anyone with the address; private stays on this device, encrypted with your wallet key.">i</span></h2>
         <label for="etchTitle">Title (optional)</label>
         <input id="etchTitle" type="text" placeholder="e.g. release notes" autocomplete="off" />
         <div class="label-row">
@@ -59,7 +59,7 @@
         <div class="fs-hint">double-click to expand</div>
         <label class="checkbox">
           <input id="etchPrivate" type="checkbox" />
-          <span>Private etch<br><span class="checkbox-sub">Data-map kept on this device.<br>Encrypted with your wallet key. <strong>Lose the wallet, lose access.</strong></span></span>
+          <span>Private etch<br><span class="checkbox-sub">Stays on this device, encrypted with your wallet key. <strong>Lose the wallet, lose access.</strong></span></span>
         </label>
         <div class="controls">
           <button id="etchBtn">Etch</button>
@@ -75,7 +75,7 @@
       </details>
 
       <details class="section-collapse">
-        <summary class="section-title-summary">chain/it <span class="info" data-tip="Your wallet's chainmarks — etch addresses you've saved, encrypted on Arbitrum and synced via wallet identity. Uses your wallet to sign a derive-key message (same as the mobile app), no copy-paste of the chainmark key needed.">i</span></summary>
+        <summary class="section-title-summary">chain/it <span class="info" data-tip="Etch addresses saved encrypted on Arbitrum. Synced via your wallet — sign one derive message, no key copy-paste.">i</span></summary>
 
         <div class="controls" style="margin-top: 8px; margin-bottom: 8px;">
           <button id="connect">Sync chainmarks</button>
@@ -117,7 +117,7 @@
       <details class="settings-block">
         <summary>Back up private etches <span class="info" data-tip="Encrypts every private etch on this device with a passphrase, then etches the blob to the network so you can restore on another device. Use after making private etches you'd hate to lose. Needs a connected wallet + a small ANT cost. One passphrase per wallet — reuse across devices or create a fresh one for each backup.">i</span></summary>
         <p class="sub">
-          Encrypts your private etch list with a passphrase, then etches it to the network for cross-device recovery (or download as a file). One passphrase per wallet — set it once, write it down. Reuse it across devices, or create a fresh passphrase for each backup. Every future backup reuses it automatically.
+          Encrypts your private etches with a passphrase. Etch to the network for cross-device recovery, or download as a file. One passphrase per wallet — set once, reuse anywhere or pick a fresh one each time.
         </p>
 
         <!-- Shown when there's a cached passphrase for this wallet. -->
@@ -180,7 +180,7 @@
       </details>
 
       <details class="settings-block">
-        <summary>Chainmark key — backup / restore <span class="info" data-tip="The 32-byte AES key that decrypts your chain/it list. Auto-derived from a wallet signature — most users never touch this. Back up the hex if you want to read chainmarks without the wallet (e.g. via the web viewer); paste a saved hex to restore the cached key on this device.">i</span></summary>
+        <summary>Chainmark key — backup / restore <span class="info" data-tip="The AES key that decrypts your chainmarks. Auto-derived from your wallet — most users never touch this. Back up the hex to read without the wallet; paste to restore.">i</span></summary>
         <p class="sub">The 32-byte AES key derived from your wallet. Shared across mobile + desktop + web viewer for the same wallet. Anyone with this key plus your wallet address can read your chainmarks.</p>
         <div class="controls" style="margin-top: 6px;">
           <button id="showChainmarkKeyBtn">Show chainmark key</button>
