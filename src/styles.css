@@ -130,19 +130,29 @@ input[type=text]:focus, input[type=password]:focus {
 .hl-italic  { font-style: italic; }
 
 .hl-lang-select {
-  background: var(--ink-3);
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-color: var(--ink-3);
   color: var(--bone);
   border: 1px solid #2a2a2a;
   border-radius: 4px;
   font: inherit;
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 11px;
-  padding: 4px 8px;
+  padding: 4px 22px 4px 8px;
   margin-left: 8px;
   cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%238a8a8a' d='M0 0h10L5 6z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
 }
 .hl-lang-select:hover { border-color: var(--copper); }
 .hl-lang-select:focus { outline: 0; border-color: var(--copper); }
+.hl-lang-select option {
+  background: var(--ink-2);
+  color: var(--bone);
+}
 .hl-lang-row {
   display: flex;
   align-items: center;
@@ -216,19 +226,29 @@ input[type=text]:focus, input[type=password]:focus {
 }
 
 .fs-editor-lang {
-  background: var(--ink-3);
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-color: var(--ink-3);
   color: var(--bone);
   border: 1px solid #2a2a2a;
   font: inherit;
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 11px;
-  padding: 4px 8px;
+  padding: 4px 22px 4px 8px;
   margin-right: 8px;
   cursor: pointer;
   border-radius: 4px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%238a8a8a' d='M0 0h10L5 6z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
 }
 .fs-editor-lang:hover { border-color: var(--copper); }
 .fs-editor-lang:focus { outline: 0; border-color: var(--copper); }
+.fs-editor-lang option {
+  background: var(--ink-2);
+  color: var(--bone);
+}
 
 .fs-editor-save {
   background: none;
