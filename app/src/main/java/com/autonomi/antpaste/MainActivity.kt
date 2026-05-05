@@ -3492,96 +3492,28 @@ class MainActivity : AppCompatActivity() {
             charCount.text = String.format(java.util.Locale.US, "%,d", n)
         }
         updateCharCount()
-        // Token cache + diff-based span tracker.
+        // Highlight model is deliberately simple: tokenize + apply spans once
+        // per text-change (debounced) or language-change. Scroll path does
+        // nothing — EditText handles painting natively, so vertical scroll
+        // stays at native speed.
         //
-        // The naive "clear all + reapply" approach was O(n²) per scroll event
-        // because removeSpan does an internal array shift on Android's
-        // Spannable, costing ~16ms at typical span counts and burning frames.
-        // This tracker keeps a map of (token index → live span objects) and
-        // only mutates the diff as the visible range slides — outgoing tokens
-        // get removeSpan, newcomers get setSpan. Scroll-time work scales with
-        // the size of the delta, not the size of the doc.
-        var cachedTokens: List<HighlightToken> = emptyList()
-        var cachedForLang: SyntaxHighlighter? = null
-        var cacheValid = false
-        val appliedSpans = HashMap<Int, Array<Any>>() // tokenIdx → live spans
-
-        fun resetAppliedSpans() {
+        // Trade-off: very large docs (~28K+ chars) can exceed Android's
+        // SpannableStringBuilder perf wall around 5-7K spans, in which case
+        // the tail of the document goes uncoloured. Smooth scroll is worth
+        // more than perfect coverage at the bottom of an enormous paste.
+        fun rehighlight() {
             val text = editText.text ?: return
-            for (spans in appliedSpans.values) for (s in spans) text.removeSpan(s)
-            appliedSpans.clear()
-        }
-        fun ensureTokenCache() {
-            val text = editText.text ?: return
-            cachedTokens = if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) emptyList()
-                           else currentHighlighter.tokenize(text)
-            cachedForLang = currentHighlighter
-            cacheValid = true
-        }
-        fun applyVisible() {
-            val text = editText.text ?: return
-            if (!cacheValid) return  // cache stale — wait for rebuild before painting
-            if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) return
-            val layout = editText.layout
-            if (layout == null || layout.lineCount == 0) return
-
-            val top = editText.scrollY
-            val bottom = top + editText.height
-            val firstLine = layout.getLineForVertical(top)
-            val lastLine = layout.getLineForVertical(bottom)
-            val bufferLines = 200
-            val startLine = (firstLine - bufferLines).coerceAtLeast(0)
-            val endLine = (lastLine + bufferLines).coerceAtMost(layout.lineCount - 1)
-            val rangeStart = layout.getLineStart(startLine)
-            val rangeEnd = layout.getLineEnd(endLine)
-
-            // Compute target set: tokens whose extent overlaps [rangeStart, rangeEnd).
-            val target = HashSet<Int>()
-            for (i in cachedTokens.indices) {
-                val t = cachedTokens[i]
-                if (t.end > rangeStart && t.start < rangeEnd) target.add(i)
+            if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) {
+                SyntaxHighlighters.clear(text)
+                return
             }
-
-            // Outgoing tokens (currently spanned but no longer in range): remove.
-            val iter = appliedSpans.entries.iterator()
-            while (iter.hasNext()) {
-                val (idx, spans) = iter.next()
-                if (idx !in target) {
-                    for (s in spans) text.removeSpan(s)
-                    iter.remove()
-                }
-            }
-            // Incoming tokens (in range but not yet spanned): add.
-            for (idx in target) {
-                if (idx in appliedSpans) continue
-                val t = cachedTokens[idx]
-                val end = t.end.coerceAtMost(text.length)
-                val start = t.start.coerceAtMost(end)
-                if (start >= end) continue
-                val list = mutableListOf<Any>()
-                if (t.color != -1) {
-                    val s = android.text.style.ForegroundColorSpan(t.color)
-                    text.setSpan(s, start, end, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    list += s
-                }
-                if (t.style != -1) {
-                    val s = android.text.style.StyleSpan(t.style)
-                    text.setSpan(s, start, end, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    list += s
-                }
-                appliedSpans[idx] = list.toTypedArray()
-            }
-        }
-        fun rebuildAndApply() {
-            resetAppliedSpans()       // old cache's token indices won't match new tokens
-            ensureTokenCache()
-            applyVisible()
+            currentHighlighter.apply(text)
         }
         val rehighlightHandler = android.os.Handler(android.os.Looper.getMainLooper())
         var rehighlightToken: Runnable? = null
-        fun scheduleRebuild(delayMs: Long) {
+        fun scheduleRehighlight(delayMs: Long = 180L) {
             rehighlightToken?.let { rehighlightHandler.removeCallbacks(it) }
-            val r = Runnable { rebuildAndApply() }
+            val r = Runnable { rehighlight() }
             rehighlightToken = r
             rehighlightHandler.postDelayed(r, delayMs)
         }
@@ -3590,18 +3522,9 @@ class MainActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: android.text.Editable?) {
                 updateCharCount()
-                // Cache + applied spans are now stale. Clear them now (no
-                // wrong-position spans showing during the debounce) and rebuild
-                // after the user stops typing.
-                cacheValid = false
-                resetAppliedSpans()
-                scheduleRebuild(180L)
+                scheduleRehighlight()
             }
         })
-        // Scroll handler: diff-only update from cached tokens. Trivially fast
-        // for small scroll deltas — typically a few dozen setSpan/removeSpan
-        // calls per frame, well under one frame budget.
-        editText.onVerticalScrollChanged = { applyVisible() }
 
         langBtn.setOnClickListener {
             val items = SyntaxHighlighters.all.map { it.displayName }.toTypedArray()
@@ -3611,7 +3534,7 @@ class MainActivity : AppCompatActivity() {
                 .setSingleChoiceItems(items, currentIdx) { d, which ->
                     currentHighlighter = SyntaxHighlighters.all[which]
                     langBtn.setTextColor(if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) ASH else COPPER_BRIGHT)
-                    rebuildAndApply()
+                    rehighlight()
                     d.dismiss()
                 }
                 .setNegativeButton("Cancel", null)
