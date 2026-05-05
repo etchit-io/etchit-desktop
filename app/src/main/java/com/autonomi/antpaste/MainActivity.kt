@@ -3492,10 +3492,11 @@ class MainActivity : AppCompatActivity() {
             charCount.text = String.format(java.util.Locale.US, "%,d", n)
         }
         updateCharCount()
-        // Compute the visible character range with a buffer of ±50 visual lines
-        // for smooth scroll, then run the highlighter just over that slice.
-        // Span count stays small (~few hundred) regardless of document size,
-        // sidestepping Android's Spannable slowdown past ~5K spans.
+        // Compute the visible character range with a buffer of ±200 visual
+        // lines and run the highlighter just over that slice. Buffer is wide
+        // enough that even a fast fling stays inside an already-coloured region
+        // long enough for the next throttled re-apply to catch up. Span count
+        // stays bounded (~few hundred) regardless of document size.
         fun rehighlightVisible() {
             val text = editText.text ?: return
             if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) {
@@ -3512,7 +3513,7 @@ class MainActivity : AppCompatActivity() {
             val bottom = top + editText.height
             val firstLine = layout.getLineForVertical(top)
             val lastLine = layout.getLineForVertical(bottom)
-            val bufferLines = 50
+            val bufferLines = 200
             val startLine = (firstLine - bufferLines).coerceAtLeast(0)
             val endLine = (lastLine + bufferLines).coerceAtMost(layout.lineCount - 1)
             val rangeStart = layout.getLineStart(startLine)
@@ -3535,10 +3536,19 @@ class MainActivity : AppCompatActivity() {
                 scheduleRehighlight()
             }
         })
+        // Throttled scroll re-highlight — fires immediately if it's been >80ms
+        // since the last apply, otherwise queues for the remaining time. Keeps
+        // colouring up *during* a fling instead of only after it stops.
+        var lastScrollApplyMs = 0L
         editText.onVerticalScrollChanged = {
-            // Quicker debounce on scroll than on text change — feel of "snapping
-            // colour into view" works better at ~60ms than the typing debounce.
-            scheduleRehighlight(60L)
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastScrollApplyMs >= 80L) {
+                lastScrollApplyMs = now
+                rehighlightToken?.let { rehighlightHandler.removeCallbacks(it) }
+                rehighlightVisible()
+            } else {
+                scheduleRehighlight(80L)
+            }
         }
 
         langBtn.setOnClickListener {
