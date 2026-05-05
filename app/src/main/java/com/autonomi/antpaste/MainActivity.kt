@@ -3306,6 +3306,21 @@ class MainActivity : AppCompatActivity() {
             )
         }
         toolbar.addView(charCount)
+        // Syntax-highlighter language picker — opens a small AlertDialog
+        // listing Plain / JSON / Markdown / Bash / Python. Selection re-runs
+        // the highlight pass on the current buffer.
+        var currentHighlighter: SyntaxHighlighter = SyntaxHighlighters.PlainHighlighter
+        val langBtn = TextView(this).apply {
+            text = "{}"
+            setTextColor(ASH)
+            textSize = 14f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(pad12, pad12, pad12, pad12)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Syntax highlighting"
+        }
+        toolbar.addView(langBtn)
         val saveBtn = TextView(this).apply {
             text = "Save"
             setTextColor(COPPER_BRIGHT)
@@ -3372,17 +3387,46 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(editText)
 
-        // Bind char-count to the EditText — formatted with thousands separator.
+        // Bind char-count + debounced syntax re-highlight to the EditText.
         fun updateCharCount() {
             val n = editText.text.length
             charCount.text = String.format(java.util.Locale.US, "%,d", n)
         }
         updateCharCount()
+        val rehighlightHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        var rehighlightToken: Runnable? = null
+        fun scheduleRehighlight() {
+            rehighlightToken?.let { rehighlightHandler.removeCallbacks(it) }
+            if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) return
+            val r = Runnable {
+                editText.text?.let { currentHighlighter.apply(it) }
+            }
+            rehighlightToken = r
+            rehighlightHandler.postDelayed(r, 180)
+        }
         editText.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) { updateCharCount() }
+            override fun afterTextChanged(s: android.text.Editable?) {
+                updateCharCount()
+                scheduleRehighlight()
+            }
         })
+
+        langBtn.setOnClickListener {
+            val items = SyntaxHighlighters.all.map { it.displayName }.toTypedArray()
+            val currentIdx = SyntaxHighlighters.all.indexOf(currentHighlighter).coerceAtLeast(0)
+            AlertDialog.Builder(this)
+                .setTitle("Syntax highlighting")
+                .setSingleChoiceItems(items, currentIdx) { d, which ->
+                    currentHighlighter = SyntaxHighlighters.all[which]
+                    langBtn.setTextColor(if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) ASH else COPPER_BRIGHT)
+                    editText.text?.let { currentHighlighter.apply(it) }
+                    d.dismiss()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
 
         dialog.setContentView(root)
         dialog.window?.apply {
