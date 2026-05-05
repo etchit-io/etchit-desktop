@@ -20,8 +20,19 @@ import android.text.style.StyleSpan
  */
 interface SyntaxHighlighter {
     val displayName: String
-    fun apply(editable: Editable)
+    /**
+     * Apply highlighting only for the [rangeStart, rangeEnd) character range.
+     * Tokens that overlap the range get a span covering the full token (so
+     * spans don't get truncated mid-word at viewport boundaries). Tokens
+     * entirely outside the range are skipped — keeps span count bounded on
+     * large documents where Android's Spannable hits a perf wall past ~5K
+     * spans. Pass 0..editable.length for the whole-doc behaviour.
+     */
+    fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int)
 }
+
+/** Convenience: highlight the whole document. */
+fun SyntaxHighlighter.apply(editable: Editable) = apply(editable, 0, editable.length)
 
 object SyntaxHighlighters {
     // Strict brand palette — every colour is from etchit-brand.html.
@@ -38,12 +49,26 @@ object SyntaxHighlighters {
         for (span in e.getSpans(0, e.length, StyleSpan::class.java)) e.removeSpan(span)
     }
 
-    private fun color(e: Editable, start: Int, end: Int, c: Int) {
-        e.setSpan(ForegroundColorSpan(c), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+    /** Run [re] over [s] and apply [c] to every match that overlaps the range. */
+    private fun colorRegex(
+        e: Editable, s: String, re: Regex, c: Int, rangeStart: Int, rangeEnd: Int,
+    ) {
+        for (m in re.findAll(s)) {
+            val mEnd = m.range.last + 1
+            if (mEnd <= rangeStart || m.range.first >= rangeEnd) continue
+            e.setSpan(ForegroundColorSpan(c), m.range.first, mEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
     }
 
-    private fun style(e: Editable, start: Int, end: Int, style: Int) {
-        e.setSpan(StyleSpan(style), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+    /** Run [re] over [s] and apply [styleFlag] to every match that overlaps the range. */
+    private fun styleRegex(
+        e: Editable, s: String, re: Regex, styleFlag: Int, rangeStart: Int, rangeEnd: Int,
+    ) {
+        for (m in re.findAll(s)) {
+            val mEnd = m.range.last + 1
+            if (mEnd <= rangeStart || m.range.first >= rangeEnd) continue
+            e.setSpan(StyleSpan(styleFlag), m.range.first, mEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
     }
 
     /** All registered highlighters in user-pickable order. */
@@ -57,7 +82,7 @@ object SyntaxHighlighters {
     // ── Plain ──────────────────────────────────────────────────────────────
     object PlainHighlighter : SyntaxHighlighter {
         override val displayName = "Plain"
-        override fun apply(editable: Editable) { clear(editable) }
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) { clear(editable) }
     }
 
     // ── JSON ───────────────────────────────────────────────────────────────
@@ -67,18 +92,18 @@ object SyntaxHighlighters {
         private val keyRe    = Regex("(\"(?:[^\"\\\\]|\\\\.)*\")\\s*:")
         private val numberRe = Regex("(?<![A-Za-z_])-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?")
         private val literalRe = Regex("\\b(true|false|null)\\b")
-        override fun apply(editable: Editable) {
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) {
             clear(editable)
             val s = editable.toString()
-            // Numbers + literals first so they're below strings/keys.
-            for (m in numberRe.findAll(s))  color(editable, m.range.first, m.range.last + 1, NUMBER)
-            for (m in literalRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, LITERAL)
-            // Strings as values — sand.
-            for (m in stringRe.findAll(s))  color(editable, m.range.first, m.range.last + 1, STRING)
+            colorRegex(editable, s, numberRe, NUMBER, rangeStart, rangeEnd)
+            colorRegex(editable, s, literalRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, stringRe, STRING, rangeStart, rangeEnd)
             // Keys override the value-colour with copper.
             for (m in keyRe.findAll(s)) {
                 val k = m.groups[1] ?: continue
-                color(editable, k.range.first, k.range.last + 1, KEYWORD)
+                val ke = k.range.last + 1
+                if (ke <= rangeStart || k.range.first >= rangeEnd) continue
+                editable.setSpan(ForegroundColorSpan(KEYWORD), k.range.first, ke, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
         }
     }
@@ -94,23 +119,27 @@ object SyntaxHighlighters {
         private val linkRe      = Regex("\\[([^]\\n]+)]\\(([^)\\n]+)\\)")
         private val listMarkerRe = Regex("(?m)^\\s*([*+-])\\s")
         private val quoteRe     = Regex("(?m)^>.*$")
-        override fun apply(editable: Editable) {
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) {
             clear(editable)
             val s = editable.toString()
-            for (m in codeBlockRe.findAll(s))   color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in inlineCodeRe.findAll(s))  color(editable, m.range.first, m.range.last + 1, STRING)
+            colorRegex(editable, s, codeBlockRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, inlineCodeRe, STRING, rangeStart, rangeEnd)
             for (m in headingRe.findAll(s)) {
-                color(editable, m.range.first, m.range.last + 1, LITERAL)
-                style(editable, m.range.first, m.range.last + 1, Typeface.BOLD)
+                val mEnd = m.range.last + 1
+                if (mEnd <= rangeStart || m.range.first >= rangeEnd) continue
+                editable.setSpan(ForegroundColorSpan(LITERAL), m.range.first, mEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                editable.setSpan(StyleSpan(Typeface.BOLD), m.range.first, mEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            for (m in boldRe.findAll(s))   style(editable, m.range.first, m.range.last + 1, Typeface.BOLD)
-            for (m in italicRe.findAll(s)) style(editable, m.range.first, m.range.last + 1, Typeface.ITALIC)
-            for (m in linkRe.findAll(s))   color(editable, m.range.first, m.range.last + 1, KEYWORD)
+            styleRegex(editable, s, boldRe, Typeface.BOLD, rangeStart, rangeEnd)
+            styleRegex(editable, s, italicRe, Typeface.ITALIC, rangeStart, rangeEnd)
+            colorRegex(editable, s, linkRe, KEYWORD, rangeStart, rangeEnd)
             for (m in listMarkerRe.findAll(s)) {
                 val g = m.groups[1] ?: continue
-                color(editable, g.range.first, g.range.last + 1, KEYWORD)
+                val ge = g.range.last + 1
+                if (ge <= rangeStart || g.range.first >= rangeEnd) continue
+                editable.setSpan(ForegroundColorSpan(KEYWORD), g.range.first, ge, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            for (m in quoteRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
+            colorRegex(editable, s, quoteRe, COMMENT, rangeStart, rangeEnd)
         }
     }
 
@@ -131,15 +160,15 @@ object SyntaxHighlighters {
         private val sqStringRe = Regex("'[^'\\n]*'")
         private val varRe = Regex("\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?")
         private val numberRe = Regex("(?<![A-Za-z_])\\d+\\b")
-        override fun apply(editable: Editable) {
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) {
             clear(editable)
             val s = editable.toString()
-            for (m in numberRe.findAll(s))  color(editable, m.range.first, m.range.last + 1, NUMBER)
-            for (m in keywordRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, KEYWORD)
-            for (m in varRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in dqStringRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in sqStringRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in commentRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
+            colorRegex(editable, s, numberRe, NUMBER, rangeStart, rangeEnd)
+            colorRegex(editable, s, keywordRe, KEYWORD, rangeStart, rangeEnd)
+            colorRegex(editable, s, varRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, dqStringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, sqStringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentRe, COMMENT, rangeStart, rangeEnd)
         }
     }
 
@@ -164,16 +193,16 @@ object SyntaxHighlighters {
         private val stringRe = Regex("[fFrRbB]{0,2}'(?:[^'\\\\\\n]|\\\\.)*'|[fFrRbB]{0,2}\"(?:[^\"\\\\\\n]|\\\\.)*\"")
         private val numberRe = Regex("(?<![A-Za-z_])\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?")
         private val decoratorRe = Regex("(?m)^\\s*@\\w+(?:\\.\\w+)*")
-        override fun apply(editable: Editable) {
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) {
             clear(editable)
             val s = editable.toString()
-            for (m in numberRe.findAll(s))    color(editable, m.range.first, m.range.last + 1, NUMBER)
-            for (m in keywordRe.findAll(s))   color(editable, m.range.first, m.range.last + 1, KEYWORD)
-            for (m in literalRe.findAll(s))   color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in decoratorRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in stringRe.findAll(s))    color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in tripleStringRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in commentRe.findAll(s))   color(editable, m.range.first, m.range.last + 1, COMMENT)
+            colorRegex(editable, s, numberRe, NUMBER, rangeStart, rangeEnd)
+            colorRegex(editable, s, keywordRe, KEYWORD, rangeStart, rangeEnd)
+            colorRegex(editable, s, literalRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, decoratorRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, stringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, tripleStringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentRe, COMMENT, rangeStart, rangeEnd)
         }
     }
 
@@ -199,15 +228,15 @@ object SyntaxHighlighters {
             "\"(?:[^\"\\\\\\n]|\\\\.)*\"|'(?:[^'\\\\\\n]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`",
         )
         private val numberRe = Regex("(?<![A-Za-z_])\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?")
-        override fun apply(editable: Editable) {
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) {
             clear(editable)
             val s = editable.toString()
-            for (m in numberRe.findAll(s))      color(editable, m.range.first, m.range.last + 1, NUMBER)
-            for (m in keywordRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, KEYWORD)
-            for (m in literalRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in stringRe.findAll(s))      color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in commentBlockRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
-            for (m in commentLineRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
+            colorRegex(editable, s, numberRe, NUMBER, rangeStart, rangeEnd)
+            colorRegex(editable, s, keywordRe, KEYWORD, rangeStart, rangeEnd)
+            colorRegex(editable, s, literalRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, stringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentBlockRe, COMMENT, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentLineRe, COMMENT, rangeStart, rangeEnd)
         }
     }
 
@@ -231,17 +260,17 @@ object SyntaxHighlighters {
         private val stringRe = Regex("\"(?:[^\"\\\\\\n]|\\\\.)*\"")
         private val annotationRe = Regex("@\\w+(?:\\.\\w+)*")
         private val numberRe = Regex("(?<![A-Za-z_])\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?[fFlL]?")
-        override fun apply(editable: Editable) {
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) {
             clear(editable)
             val s = editable.toString()
-            for (m in numberRe.findAll(s))      color(editable, m.range.first, m.range.last + 1, NUMBER)
-            for (m in keywordRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, KEYWORD)
-            for (m in literalRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in annotationRe.findAll(s))  color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in stringRe.findAll(s))      color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in tripleStringRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in commentBlockRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
-            for (m in commentLineRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
+            colorRegex(editable, s, numberRe, NUMBER, rangeStart, rangeEnd)
+            colorRegex(editable, s, keywordRe, KEYWORD, rangeStart, rangeEnd)
+            colorRegex(editable, s, literalRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, annotationRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, stringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, tripleStringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentBlockRe, COMMENT, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentLineRe, COMMENT, rangeStart, rangeEnd)
         }
     }
 
@@ -262,16 +291,16 @@ object SyntaxHighlighters {
         private val stringRe = Regex("\"(?:[^\"\\\\]|\\\\.)*\"")
         private val attributeRe = Regex("(?m)#!?\\[[^\\]]*\\]")
         private val numberRe = Regex("(?<![A-Za-z_])\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?(?:[ui](?:8|16|32|64|128|size)|[fF](?:32|64))?")
-        override fun apply(editable: Editable) {
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) {
             clear(editable)
             val s = editable.toString()
-            for (m in numberRe.findAll(s))      color(editable, m.range.first, m.range.last + 1, NUMBER)
-            for (m in keywordRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, KEYWORD)
-            for (m in literalRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in attributeRe.findAll(s))   color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in stringRe.findAll(s))      color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in commentBlockRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
-            for (m in commentLineRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
+            colorRegex(editable, s, numberRe, NUMBER, rangeStart, rangeEnd)
+            colorRegex(editable, s, keywordRe, KEYWORD, rangeStart, rangeEnd)
+            colorRegex(editable, s, literalRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, attributeRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, stringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentBlockRe, COMMENT, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentLineRe, COMMENT, rangeStart, rangeEnd)
         }
     }
 
@@ -289,15 +318,15 @@ object SyntaxHighlighters {
         private val commentBlockRe = Regex("(?s)/\\*.*?\\*/")
         private val stringRe = Regex("\"(?:[^\"\\\\]|\\\\.)*\"|`[^`]*`")
         private val numberRe = Regex("(?<![A-Za-z_])\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?")
-        override fun apply(editable: Editable) {
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) {
             clear(editable)
             val s = editable.toString()
-            for (m in numberRe.findAll(s))      color(editable, m.range.first, m.range.last + 1, NUMBER)
-            for (m in keywordRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, KEYWORD)
-            for (m in literalRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in stringRe.findAll(s))      color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in commentBlockRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
-            for (m in commentLineRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
+            colorRegex(editable, s, numberRe, NUMBER, rangeStart, rangeEnd)
+            colorRegex(editable, s, keywordRe, KEYWORD, rangeStart, rangeEnd)
+            colorRegex(editable, s, literalRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, stringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentBlockRe, COMMENT, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentLineRe, COMMENT, rangeStart, rangeEnd)
         }
     }
 
@@ -308,13 +337,13 @@ object SyntaxHighlighters {
         private val stringRe = Regex("\"[^\"]*\"|'[^']*'")
         private val tagRe = Regex("</?[A-Za-z][\\w-]*|>|/>")
         private val attrRe = Regex("\\b[A-Za-z-]+(?==)")
-        override fun apply(editable: Editable) {
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) {
             clear(editable)
             val s = editable.toString()
-            for (m in attrRe.findAll(s))    color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in tagRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, KEYWORD)
-            for (m in stringRe.findAll(s))  color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in commentRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
+            colorRegex(editable, s, attrRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, tagRe, KEYWORD, rangeStart, rangeEnd)
+            colorRegex(editable, s, stringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentRe, COMMENT, rangeStart, rangeEnd)
         }
     }
 
@@ -327,15 +356,15 @@ object SyntaxHighlighters {
         private val hexColorRe = Regex("#[0-9a-fA-F]{3,8}\\b")
         private val numberRe = Regex("(?<![A-Za-z_])-?\\d+(?:\\.\\d+)?(?:px|em|rem|%|vh|vw|s|ms|deg|fr)?")
         private val atRuleRe = Regex("@[a-z-]+")
-        override fun apply(editable: Editable) {
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) {
             clear(editable)
             val s = editable.toString()
-            for (m in numberRe.findAll(s))   color(editable, m.range.first, m.range.last + 1, NUMBER)
-            for (m in hexColorRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in propertyRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in atRuleRe.findAll(s))   color(editable, m.range.first, m.range.last + 1, KEYWORD)
-            for (m in stringRe.findAll(s))   color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in commentRe.findAll(s))  color(editable, m.range.first, m.range.last + 1, COMMENT)
+            colorRegex(editable, s, numberRe, NUMBER, rangeStart, rangeEnd)
+            colorRegex(editable, s, hexColorRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, propertyRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, atRuleRe, KEYWORD, rangeStart, rangeEnd)
+            colorRegex(editable, s, stringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentRe, COMMENT, rangeStart, rangeEnd)
         }
     }
 
@@ -348,15 +377,15 @@ object SyntaxHighlighters {
         private val listMarkerRe = Regex("(?m)^\\s*-(?=\\s)")
         private val literalRe = Regex("\\b(true|false|null|yes|no|~)\\b")
         private val numberRe = Regex("(?<![A-Za-z_])-?\\d+(?:\\.\\d+)?\\b")
-        override fun apply(editable: Editable) {
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) {
             clear(editable)
             val s = editable.toString()
-            for (m in numberRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, NUMBER)
-            for (m in literalRe.findAll(s))    color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in keyRe.findAll(s))        color(editable, m.range.first, m.range.last + 1, KEYWORD)
-            for (m in listMarkerRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in stringRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in commentRe.findAll(s))    color(editable, m.range.first, m.range.last + 1, COMMENT)
+            colorRegex(editable, s, numberRe, NUMBER, rangeStart, rangeEnd)
+            colorRegex(editable, s, literalRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, keyRe, KEYWORD, rangeStart, rangeEnd)
+            colorRegex(editable, s, listMarkerRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, stringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentRe, COMMENT, rangeStart, rangeEnd)
         }
     }
 
@@ -380,15 +409,15 @@ object SyntaxHighlighters {
         private val commentBlockRe = Regex("(?s)/\\*.*?\\*/")
         private val stringRe = Regex("'(?:[^'\\\\]|\\\\.)*'")
         private val numberRe = Regex("(?<![A-Za-z_])\\d+(?:\\.\\d+)?\\b")
-        override fun apply(editable: Editable) {
+        override fun apply(editable: Editable, rangeStart: Int, rangeEnd: Int) {
             clear(editable)
             val s = editable.toString()
-            for (m in numberRe.findAll(s))      color(editable, m.range.first, m.range.last + 1, NUMBER)
-            for (m in keywordRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, KEYWORD)
-            for (m in literalRe.findAll(s))     color(editable, m.range.first, m.range.last + 1, LITERAL)
-            for (m in stringRe.findAll(s))      color(editable, m.range.first, m.range.last + 1, STRING)
-            for (m in commentBlockRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
-            for (m in commentLineRe.findAll(s)) color(editable, m.range.first, m.range.last + 1, COMMENT)
+            colorRegex(editable, s, numberRe, NUMBER, rangeStart, rangeEnd)
+            colorRegex(editable, s, keywordRe, KEYWORD, rangeStart, rangeEnd)
+            colorRegex(editable, s, literalRe, LITERAL, rangeStart, rangeEnd)
+            colorRegex(editable, s, stringRe, STRING, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentBlockRe, COMMENT, rangeStart, rangeEnd)
+            colorRegex(editable, s, commentLineRe, COMMENT, rangeStart, rangeEnd)
         }
     }
 }

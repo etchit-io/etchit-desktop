@@ -3486,22 +3486,46 @@ class MainActivity : AppCompatActivity() {
             false
         }
 
-        // Bind char-count + debounced syntax re-highlight to the EditText.
+        // Bind char-count + viewport-aware syntax re-highlight to the EditText.
         fun updateCharCount() {
             val n = editText.text.length
             charCount.text = String.format(java.util.Locale.US, "%,d", n)
         }
         updateCharCount()
+        // Compute the visible character range with a buffer of ±50 visual lines
+        // for smooth scroll, then run the highlighter just over that slice.
+        // Span count stays small (~few hundred) regardless of document size,
+        // sidestepping Android's Spannable slowdown past ~5K spans.
+        fun rehighlightVisible() {
+            val text = editText.text ?: return
+            if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) {
+                SyntaxHighlighters.clear(text)
+                return
+            }
+            val layout = editText.layout
+            if (layout == null || layout.lineCount == 0) {
+                // Layout not ready yet — full-doc fall-back, run once.
+                currentHighlighter.apply(text)
+                return
+            }
+            val top = editText.scrollY
+            val bottom = top + editText.height
+            val firstLine = layout.getLineForVertical(top)
+            val lastLine = layout.getLineForVertical(bottom)
+            val bufferLines = 50
+            val startLine = (firstLine - bufferLines).coerceAtLeast(0)
+            val endLine = (lastLine + bufferLines).coerceAtMost(layout.lineCount - 1)
+            val rangeStart = layout.getLineStart(startLine)
+            val rangeEnd = layout.getLineEnd(endLine)
+            currentHighlighter.apply(text, rangeStart, rangeEnd)
+        }
         val rehighlightHandler = android.os.Handler(android.os.Looper.getMainLooper())
         var rehighlightToken: Runnable? = null
-        fun scheduleRehighlight() {
+        fun scheduleRehighlight(delayMs: Long = 180L) {
             rehighlightToken?.let { rehighlightHandler.removeCallbacks(it) }
-            if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) return
-            val r = Runnable {
-                editText.text?.let { currentHighlighter.apply(it) }
-            }
+            val r = Runnable { rehighlightVisible() }
             rehighlightToken = r
-            rehighlightHandler.postDelayed(r, 180)
+            rehighlightHandler.postDelayed(r, delayMs)
         }
         editText.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -3511,6 +3535,11 @@ class MainActivity : AppCompatActivity() {
                 scheduleRehighlight()
             }
         })
+        editText.onVerticalScrollChanged = {
+            // Quicker debounce on scroll than on text change — feel of "snapping
+            // colour into view" works better at ~60ms than the typing debounce.
+            scheduleRehighlight(60L)
+        }
 
         langBtn.setOnClickListener {
             val items = SyntaxHighlighters.all.map { it.displayName }.toTypedArray()
@@ -3520,7 +3549,7 @@ class MainActivity : AppCompatActivity() {
                 .setSingleChoiceItems(items, currentIdx) { d, which ->
                     currentHighlighter = SyntaxHighlighters.all[which]
                     langBtn.setTextColor(if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) ASH else COPPER_BRIGHT)
-                    editText.text?.let { currentHighlighter.apply(it) }
+                    rehighlightVisible()
                     d.dismiss()
                 }
                 .setNegativeButton("Cancel", null)

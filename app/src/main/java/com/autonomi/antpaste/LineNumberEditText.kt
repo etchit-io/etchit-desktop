@@ -22,6 +22,19 @@ class LineNumberEditText @JvmOverloads constructor(
 
     val gutterWidthPx: Int = (40 * context.resources.displayMetrics.density).toInt()
 
+    /**
+     * Optional callback invoked whenever the editor's vertical scroll position
+     * changes. Used by the fullscreen editor to re-apply syntax highlighting
+     * for the new visible region (viewport-only highlighting keeps the active
+     * span count bounded on large documents).
+     */
+    var onVerticalScrollChanged: (() -> Unit)? = null
+
+    override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
+        super.onScrollChanged(l, t, oldl, oldt)
+        if (t != oldt) onVerticalScrollChanged?.invoke()
+    }
+
     private val gutterPaint = Paint().apply {
         isAntiAlias = true
         color = GUTTER_COLOR
