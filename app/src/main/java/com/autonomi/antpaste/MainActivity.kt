@@ -803,6 +803,59 @@ class MainActivity : AppCompatActivity() {
     // ── Wallet Status ─────────────────────────────────────────────
 
     private var walletStatusJob: Job? = null
+    private var antBalanceJob: Job? = null
+    private var lastAntBalanceWei: java.math.BigInteger? = null
+
+    private fun formatAnt(atto: java.math.BigInteger): String {
+        val one = java.math.BigInteger.TEN.pow(18)
+        val whole = atto.divide(one)
+        val frac = atto.mod(one)
+            .multiply(java.math.BigInteger.valueOf(10_000L))
+            .divide(one)
+        return "$whole.${frac.toString().padStart(4, '0')}"
+    }
+
+    private suspend fun fetchAntBalance(address: String): java.math.BigInteger? {
+        return try {
+            val rpc = com.autonomi.antpaste.wallet.EvmRpc(BuildConfig.RPC_URL)
+            val data = com.autonomi.antpaste.wallet.Erc20.encodeBalanceOf(address)
+            val result = rpc.ethCall(BuildConfig.ANT_TOKEN_ADDRESS, data)
+            if (result.size == 32) com.autonomi.antpaste.wallet.Erc20.decodeUint256(result) else null
+        } catch (e: Exception) {
+            Log.w("ant-paste", "ANT balance fetch failed: ${e.message}")
+            null
+        }
+    }
+
+    private fun renderConnectedWallet(address: String) {
+        val short = "${address.take(6)}…${address.takeLast(4)}"
+        val bal = lastAntBalanceWei
+        val text = if (bal != null) "Wallet: $short • ${formatAnt(bal)} ANT" else "Wallet: $short"
+        binding.walletStatusText.text = text
+        binding.walletStatusText.setTextColor(STATUS_GREEN)
+    }
+
+    // Periodic ANT-balance refresh while the wallet stays connected. Mirrors
+    // the desktop client's 30s interval. Cheap eth_call, negligible cost.
+    private fun startAntBalanceRefresh(address: String) {
+        antBalanceJob?.cancel()
+        antBalanceJob = lifecycleScope.launch {
+            while (isActive) {
+                val bal = fetchAntBalance(address)
+                if (bal != null) {
+                    lastAntBalanceWei = bal
+                    renderConnectedWallet(address)
+                }
+                delay(30_000)
+            }
+        }
+    }
+
+    private fun stopAntBalanceRefresh() {
+        antBalanceJob?.cancel()
+        antBalanceJob = null
+        lastAntBalanceWei = null
+    }
 
     private fun updateWalletStatus() {
         binding.walletStatusText.visibility = View.VISIBLE
@@ -816,19 +869,21 @@ class MainActivity : AppCompatActivity() {
             .onEach { s ->
                 when (s) {
                     is SessionState.Connected -> {
-                        val short = "${s.address.take(6)}…${s.address.takeLast(4)}"
-                        binding.walletStatusText.text = "Wallet: $short"
-                        binding.walletStatusText.setTextColor(STATUS_GREEN)
+                        renderConnectedWallet(s.address)
+                        startAntBalanceRefresh(s.address)
                     }
                     SessionState.Connecting -> {
+                        stopAntBalanceRefresh()
                         binding.walletStatusText.text = "Connecting wallet…"
                         binding.walletStatusText.setTextColor(COPPER_BRIGHT)
                     }
                     is SessionState.Error -> {
+                        stopAntBalanceRefresh()
                         binding.walletStatusText.text = "Wallet error: ${s.reason}"
                         binding.walletStatusText.setTextColor(STATUS_RED)
                     }
                     SessionState.Disconnected -> {
+                        stopAntBalanceRefresh()
                         binding.walletStatusText.text = "No wallet \u2014 read only"
                         binding.walletStatusText.setTextColor(ASH)
                     }
