@@ -3417,22 +3417,12 @@ class MainActivity : AppCompatActivity() {
             )
             gravity = android.view.Gravity.TOP or android.view.Gravity.START
             setBackgroundColor(0)
-            // Both axes of scroll handled by the EditText itself — no wrapping
-            // HorizontalScrollView. The HSV was adding touch-intercept latency
-            // on every up/down drag (it has to check for a horizontal gesture
-            // first), which made vertical scroll feel laggy. setHorizontallyScrolling
-            // makes EditText size to its longest line and fling sideways on touch
-            // natively; vertical scroll stays as-fast-as-possible.
-            setHorizontallyScrolling(true)
-            isHorizontalScrollBarEnabled = true
             isVerticalScrollBarEnabled = true
             scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
             overScrollMode = View.OVER_SCROLL_NEVER
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f,
-            )
+            // No wrapping — editor sizes to its longest line; the host
+            // SmartHorizontalScrollView pans sideways for long lines.
+            setHorizontallyScrolling(true)
             if (editable) {
                 isFocusable = true
                 isFocusableInTouchMode = true
@@ -3448,7 +3438,28 @@ class MainActivity : AppCompatActivity() {
                 setTextIsSelectable(true)
             }
         }
-        root.addView(editText)
+        // SmartHorizontalScrollView passes vertical drags straight through to
+        // the EditText (so up/down scroll stays at native speed) and only
+        // intercepts when the gesture is clearly horizontal — gives smooth
+        // sideways pan for long lines without slowing vertical scroll.
+        val editorScroll = SmartHorizontalScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f,
+            )
+            isHorizontalScrollBarEnabled = true
+            isFillViewport = true
+            overScrollMode = View.OVER_SCROLL_NEVER
+            scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
+            isSmoothScrollingEnabled = true
+        }
+        editText.layoutParams = android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+        )
+        editorScroll.addView(editText)
+        root.addView(editorScroll)
 
         // Bind char-count + debounced syntax re-highlight to the EditText.
         fun updateCharCount() {
