@@ -3461,6 +3461,31 @@ class MainActivity : AppCompatActivity() {
         editorScroll.addView(editText)
         root.addView(editorScroll)
 
+        // Pinch-to-zoom on the editor text — clamped between 10sp and 28sp.
+        // Gutter line numbers track automatically because they're drawn at
+        // the EditText's getLineBaseline(), which scales with textSize.
+        var currentTextSp = 15f
+        val minSp = 10f
+        val maxSp = 28f
+        val scaleDetector = android.view.ScaleGestureDetector(
+            this,
+            object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(detector: android.view.ScaleGestureDetector): Boolean {
+                    val next = (currentTextSp * detector.scaleFactor).coerceIn(minSp, maxSp)
+                    if (next != currentTextSp) {
+                        currentTextSp = next
+                        editText.textSize = currentTextSp
+                    }
+                    return true
+                }
+            },
+        )
+        editText.setOnTouchListener { _, event ->
+            scaleDetector.onTouchEvent(event)
+            // Don't consume — EditText still needs to handle taps, typing, selection.
+            false
+        }
+
         // Bind char-count + debounced syntax re-highlight to the EditText.
         fun updateCharCount() {
             val n = editText.text.length

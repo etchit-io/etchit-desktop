@@ -26,6 +26,8 @@ class SmartHorizontalScrollView @JvmOverloads constructor(
     private var downY: Float = 0f
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        // Multi-touch (e.g. pinch-to-zoom) must reach the child untouched.
+        if (ev.pointerCount > 1) return false
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = ev.x
