@@ -3227,13 +3227,13 @@ class MainActivity : AppCompatActivity() {
     private fun parseEnvelope(raw: String): Pair<String, String> =
         PasteUtils.parseEnvelope(raw)
 
-    // Fullscreen text dialog — covers two cases triggered by double-tap:
-    //   1. editable=true: edit the etch content in a tall focused editor.
-    //      onCommit fires with the edited text when the user taps Done.
-    //   2. editable=false: read-only view of fetched text that's been
-    //      truncated to maxLines in the result card. Lets the user scroll
-    //      the full content and select / copy.
-    // Both flows include a "Save as file…" action that uses the SAF
+    // Plain fullscreen text editor — covers two cases triggered by double-tap.
+    //   editable=true:  edit the etch content in a focused fullscreen editor.
+    //                    onCommit fires with the latest text on dismiss
+    //                    (close button, back, swipe — auto-commit, no Cancel).
+    //   editable=false: read-only fullscreen view of fetched text that was
+    //                    truncated to maxLines in the result card.
+    // Top bar holds an ✕ close button and a "Save" action that uses the SAF
     // CreateDocument launcher to write the current text out as .txt.
     private fun showFullScreenTextDialog(
         title: String,
@@ -3242,55 +3242,132 @@ class MainActivity : AppCompatActivity() {
         onCommit: ((String) -> Unit)? = null,
     ) {
         val dp = resources.displayMetrics.density
-        val pad = (16 * dp).toInt()
+        val pad12 = (12 * dp).toInt()
+        val pad16 = (16 * dp).toInt()
 
+        val dialog = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(INK_2)
+            fitsSystemWindows = true
+        }
+
+        // ── Top bar ── (✕ close · optional title · Save)
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setBackgroundColor(INK)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (56 * dp).toInt(),
+            )
+        }
+        val closeBtn = android.widget.ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            setColorFilter(BONE)
+            background = null
+            setPadding(pad12, pad12, pad12, pad12)
+            contentDescription = "Close"
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.MATCH_PARENT,
+            )
+        }
+        toolbar.addView(closeBtn)
+        if (title.isNotBlank()) {
+            toolbar.addView(TextView(this).apply {
+                text = title
+                setTextColor(BONE)
+                textSize = 15f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(pad12, 0, pad12, 0)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+        } else {
+            toolbar.addView(View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+            })
+        }
+        val saveBtn = TextView(this).apply {
+            text = "Save"
+            setTextColor(COPPER_BRIGHT)
+            textSize = 14f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(pad16, pad12, pad16, pad12)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Save as file"
+            background = android.content.res.ColorStateList.valueOf(0).let { null }
+        }
+        toolbar.addView(saveBtn)
+        root.addView(toolbar)
+
+        // ── Editor body ── edge-to-edge EditText filling the rest
         val editText = EditText(this).apply {
             setText(initialText)
             setTextColor(BONE)
             setHintTextColor(ASH)
             textSize = 14f
             typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(pad, pad, pad, pad)
+            setPadding(pad16, pad16, pad16, pad16)
             gravity = android.view.Gravity.TOP or android.view.Gravity.START
-            setBackgroundColor(INK_2)
-            isFocusable = editable
-            isFocusableInTouchMode = editable
-            isCursorVisible = editable
-            inputType = if (editable) {
-                android.text.InputType.TYPE_CLASS_TEXT or
-                    android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-                    android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            } else {
-                android.text.InputType.TYPE_NULL
-            }
-            if (!editable) setTextIsSelectable(true)
+            setBackgroundColor(0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f,
             )
-            if (editable) setSelection(initialText.length)
+            isVerticalScrollBarEnabled = true
+            if (editable) {
+                isFocusable = true
+                isFocusableInTouchMode = true
+                isCursorVisible = true
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                    android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                setSelection(initialText.length)
+            } else {
+                isFocusable = false
+                isCursorVisible = false
+                inputType = android.text.InputType.TYPE_NULL
+                setTextIsSelectable(true)
+            }
+        }
+        root.addView(editText)
+
+        dialog.setContentView(root)
+        dialog.window?.apply {
+            setLayout(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(INK_2))
         }
 
-        val builder = AlertDialog.Builder(this).setView(editText)
-        if (title.isNotBlank()) builder.setTitle(title)
-        val dialog = builder
-            .setPositiveButton(if (editable) "Done" else "Close") { _, _ ->
-                if (editable) onCommit?.invoke(editText.text.toString())
-            }
-            .setNeutralButton("Save as file…") { _, _ ->
-                val text = editText.text.toString()
-                if (editable) onCommit?.invoke(text)
-                pendingTextToSave = text
-                val baseName = title.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "etchit" }
-                saveTextLauncher.launch("$baseName.txt")
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-        dialog.window?.setLayout(
-            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-        )
+        // All exit paths (close button, back button, swipe) auto-commit when
+        // editable. setOnDismissListener fires for every dismiss flavour, so
+        // we don't need to special-case the close button.
+        dialog.setOnDismissListener {
+            if (editable) onCommit?.invoke(editText.text.toString())
+        }
+        closeBtn.setOnClickListener { dialog.dismiss() }
+        saveBtn.setOnClickListener {
+            pendingTextToSave = editText.text.toString()
+            val baseName = title.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "etchit" }
+            saveTextLauncher.launch("$baseName.txt")
+            dialog.dismiss()
+        }
+
         dialog.show()
+        if (editable) {
+            editText.requestFocus()
+            val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                as android.view.inputmethod.InputMethodManager
+            imm.showSoftInput(editText, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
     }
 
     private fun showResult(title: String, address: String, content: String) {
