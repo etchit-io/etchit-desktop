@@ -271,7 +271,10 @@ input[type=text]:focus, input[type=password]:focus {
   min-height: 0;
 }
 
-/* Source-line gutter — collapsed in Plain mode, visible for code. */
+/* Source-line gutter — collapsed in Plain mode, visible for code.
+   line-height is pinned to the editor body's effective row height
+   (15px × 1.6 = 24px) so 11px gutter numbers stay aligned with the
+   text baselines instead of drifting off-line by line. */
 .fs-editor-gutter {
   flex: 0 0 0px;
   width: 0;
@@ -284,7 +287,7 @@ input[type=text]:focus, input[type=password]:focus {
   overflow: hidden;
   user-select: none;
   background: transparent;
-  line-height: 1.6;
+  line-height: 24px;
   transition: flex-basis 100ms ease, width 100ms ease;
 }
 .fs-editor-gutter.fs-gutter-on {
