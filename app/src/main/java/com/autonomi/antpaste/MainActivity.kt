@@ -3359,13 +3359,13 @@ class MainActivity : AppCompatActivity() {
             )
         }
         toolbar.addView(charCount)
-        // Syntax-highlighter language picker — opens a small AlertDialog
-        // listing Plain / JSON / Markdown / Bash / Python. Selection re-runs
-        // the highlight pass on the current buffer.
-        var currentHighlighter: SyntaxHighlighter = SyntaxHighlighters.PlainHighlighter
+        // Syntax-highlighter language picker. Auto-detects from the buffer's
+        // first non-blank line on open — Plain unless the heuristic is
+        // confident. The user can override via the picker.
+        var currentHighlighter: SyntaxHighlighter = SyntaxHighlighters.detectLanguage(initialText)
         val langBtn = TextView(this).apply {
             text = "{}"
-            setTextColor(ASH)
+            setTextColor(if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) ASH else COPPER_BRIGHT)
             textSize = 14f
             typeface = android.graphics.Typeface.MONOSPACE
             setPadding(pad12, pad12, pad12, pad12)
@@ -3430,7 +3430,10 @@ class MainActivity : AppCompatActivity() {
                 inputType = android.text.InputType.TYPE_CLASS_TEXT or
                     android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                     android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                setSelection(initialText.length)
+                // Open at the start of the text so the user's reading mental
+                // model is "top-to-bottom" — the previous setSelection(end)
+                // forced the editor to scroll to the bottom on every paste.
+                setSelection(0)
             } else {
                 isFocusable = false
                 isCursorVisible = false
@@ -3525,6 +3528,11 @@ class MainActivity : AppCompatActivity() {
                 scheduleRehighlight()
             }
         })
+        // Initial paint — TextWatcher only fires on text *change*, and the
+        // editor is opened with text pre-populated, so apply the auto-detected
+        // highlighter once now. Posted so the layout pass has a chance to
+        // settle before the spans land.
+        editText.post { rehighlight() }
 
         langBtn.setOnClickListener {
             val items = SyntaxHighlighters.all.map { it.displayName }.toTypedArray()
@@ -3572,6 +3580,15 @@ class MainActivity : AppCompatActivity() {
                 as android.view.inputmethod.InputMethodManager
             imm.showSoftInput(editText, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
         }
+        // requestFocus + IME show both trigger an auto-scroll-to-cursor; if
+        // the cursor lands anywhere past the visible viewport, the EditText
+        // jumps there. Force the editor back to the top *after* both have
+        // settled — the delay outlasts the IME animation on most devices.
+        editText.postDelayed({
+            editText.setSelection(0)
+            editText.scrollTo(0, 0)
+            editorScroll.scrollTo(0, 0)
+        }, 250L)
     }
 
     private fun showResult(title: String, address: String, content: String) {
