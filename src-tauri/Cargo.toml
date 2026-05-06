@@ -28,7 +28,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-log = "0.2"
 # Path dep into the Android repo's vendored Autonomi FFI crate. Cross-repo
 # path is fragile but matches dev layout (~/Desktop/etchit-android-v3/ next
-# to ~/Desktop/etchit-desktop/). Replace with a git dep once ant-sdk is
+# to ~/Desktop/etchit-desktop/). Replace with a git dep once the FFI is
 # extracted to its own repo.
-ant-ffi = { path = "../../etchit-android-v3/ant-sdk/ffi/rust/ant-ffi" }
+ant-ffi = { path = "../../etchit-android-v3/ffi/rust/ant-ffi" }
 
