@@ -9,7 +9,7 @@
 // On any code language: wrap is disabled, gutter shows source-line numbers,
 // horizontal scroll where needed — code-friendly.
 
-import { LANGUAGES, highlightAs } from "./syntaxHighlight";
+import { LANGUAGES, highlightAs, detectLanguage } from "./syntaxHighlight";
 
 export type FullscreenEditorOpts = {
   initialText: string;
@@ -56,7 +56,9 @@ export function openFullscreenEditor(opts: FullscreenEditorOpts): void {
     o.textContent = lang.name;
     langSelect.appendChild(o);
   }
-  langSelect.value = "plain";
+  // Auto-detect from the buffer's first non-blank line. Plain unless the
+  // heuristic is confident — the user can override via the picker.
+  langSelect.value = detectLanguage(opts.initialText);
   bar.appendChild(langSelect);
 
   const saveBtn = document.createElement("button");
@@ -106,7 +108,7 @@ export function openFullscreenEditor(opts: FullscreenEditorOpts): void {
 
   // ── State + render ─────────────────────────────────────────────
   let currentText = opts.initialText;
-  let currentLang = "plain";
+  let currentLang = langSelect.value;
 
   function refreshChars(): void {
     charsEl.textContent = currentText.length.toLocaleString();
@@ -166,7 +168,15 @@ export function openFullscreenEditor(opts: FullscreenEditorOpts): void {
     });
     setTimeout(() => {
       textarea!.focus();
-      textarea!.setSelectionRange(currentText.length, currentText.length);
+      // Open at the top of the document — cursor at 0 and scroll
+      // origin reset on the textarea, the highlighted <pre>, and the
+      // line-number gutter so they all stay in sync.
+      textarea!.setSelectionRange(0, 0);
+      textarea!.scrollTop = 0;
+      textarea!.scrollLeft = 0;
+      highlight.scrollTop = 0;
+      highlight.scrollLeft = 0;
+      gutter.scrollTop = 0;
     }, 30);
   }
 

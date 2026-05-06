@@ -95,15 +95,69 @@ const json: Language = {
 };
 
 // ── Markdown ────────────────────────────────────────────────────────────
+// Markdown without fenced-block routing — used for prose between blocks.
+// (The triple-backtick alternative is removed from the string capture so
+// fenced blocks are handled separately with sub-language embedding.)
+const markdownOnly = (s: string) => tokenize(
+  s,
+  /(?<comment>^>.*$)|(?<heading>^#{1,6} .*$)|(?<string>`[^`\n]+`)|(?<link>\[[^\]\n]+\]\([^)\n]+\))|(?<keyword>^\s*[-*+] )|(?<bold>\*\*[^*\n]+\*\*)|(?<italic>(?<![*_])\*[^*\n]+\*(?![*_])|(?<![*_])_[^_\n]+_(?![*_]))/gm,
+  COMMON_CLASSES,
+);
+
 const markdown: Language = {
   id: "markdown",
   name: "Markdown",
-  highlight: (s) => tokenize(
-    s,
-    /(?<comment>^>.*$)|(?<heading>^#{1,6} .*$)|(?<string>```[\s\S]*?```|`[^`\n]+`)|(?<link>\[[^\]\n]+\]\([^)\n]+\))|(?<keyword>^\s*[-*+] )|(?<bold>\*\*[^*\n]+\*\*)|(?<italic>(?<![*_])\*[^*\n]+\*(?![*_])|(?<![*_])_[^_\n]+_(?![*_]))/gm,
-    COMMON_CLASSES,
-  ),
+  highlight: (s) => {
+    type Block = { fenceStart: number; bodyStart: number; bodyEnd: number; fenceEnd: number; lang: Language | null };
+    const blocks: Block[] = [];
+    const re = /```(\w+)?[ \t]*\n?([\s\S]*?)```/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(s)) !== null) {
+      const hint = m[1] ?? null;
+      const body = m[2] ?? "";
+      const fenceStart = m.index;
+      const bodyStart = fenceStart + m[0].indexOf(body);
+      const bodyEnd = bodyStart + body.length;
+      const fenceEnd = fenceStart + m[0].length;
+      blocks.push({ fenceStart, bodyStart, bodyEnd, fenceEnd, lang: langForHint(hint) });
+    }
+    let out = "";
+    let pos = 0;
+    for (const b of blocks) {
+      if (b.fenceStart > pos) out += markdownOnly(s.slice(pos, b.fenceStart));
+      // Opening fence + optional lang hint, then closing fence — both painted
+      // as STRING. Body in between is the embedded language (or escaped text
+      // when the language isn't recognised).
+      out += `<span class="hl-string">${escapeHtml(s.slice(b.fenceStart, b.bodyStart))}</span>`;
+      out += b.lang
+        ? b.lang.highlight(s.slice(b.bodyStart, b.bodyEnd))
+        : `<span class="hl-string">${escapeHtml(s.slice(b.bodyStart, b.bodyEnd))}</span>`;
+      out += `<span class="hl-string">${escapeHtml(s.slice(b.bodyEnd, b.fenceEnd))}</span>`;
+      pos = b.fenceEnd;
+    }
+    if (pos < s.length) out += markdownOnly(s.slice(pos));
+    return out;
+  },
 };
+
+/** Resolve a fenced-code-block hint to a Language, null if unknown. */
+function langForHint(hint: string | null): Language | null {
+  if (!hint) return null;
+  switch (hint.toLowerCase()) {
+    case "python": case "py": return python;
+    case "javascript": case "js": case "typescript": case "ts": case "jsx": case "tsx": return jsts;
+    case "bash": case "sh": case "shell": case "zsh": return bash;
+    case "kotlin": case "kt": case "kts": return kotlin;
+    case "rust": case "rs": return rust;
+    case "go": case "golang": return go;
+    case "html": case "xml": case "svg": return html;
+    case "css": case "scss": return css;
+    case "yaml": case "yml": return yaml;
+    case "sql": return sql;
+    case "json": case "jsonc": return json;
+    default: return null;
+  }
+}
 
 // ── Bash ────────────────────────────────────────────────────────────────
 const bash: Language = {
@@ -139,16 +193,34 @@ const jstsKeywords = [
   "public", "private", "protected", "static", "readonly", "abstract",
   "namespace", "declare", "module",
 ].join("|");
+// Common built-in globals + constructors — coloured as literals so the
+// usual touchpoints to the runtime (document, fetch, JSON, ...) get
+// visual punctuation rather than blending into bare identifiers.
+const jstsBuiltins = [
+  "document", "window", "globalThis", "self", "console", "navigator", "location",
+  "history", "screen", "alert", "confirm", "prompt",
+  "fetch", "Request", "Response", "Headers", "URL", "URLSearchParams",
+  "setTimeout", "setInterval", "clearTimeout", "clearInterval",
+  "requestAnimationFrame", "cancelAnimationFrame",
+  "Math", "JSON", "Date", "Promise", "Symbol",
+  "Array", "Object", "Number", "String", "Boolean", "BigInt",
+  "Map", "Set", "WeakMap", "WeakSet",
+  "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError",
+  "RegExp", "Function", "Reflect", "Proxy",
+  "Uint8Array", "Int8Array", "Uint16Array", "Int16Array",
+  "Uint32Array", "Int32Array", "Float32Array", "Float64Array",
+  "ArrayBuffer", "DataView",
+].join("|");
 const jsts: Language = {
   id: "jsts",
   name: "JS / TS",
   highlight: (s) => tokenize(
     s,
     new RegExp(
-      `(?<comment>\\/\\/.*$|\\/\\*[\\s\\S]*?\\*\\/)|(?<string>"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|\`(?:[^\`\\\\]|\\\\.)*\`)|(?<keyword>\\b(?:${jstsKeywords})\\b)|(?<literal>\\b(?:true|false|null|undefined|NaN|Infinity)\\b)|(?<number>(?<![A-Za-z_])\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)`,
+      `(?<comment>\\/\\/.*$|\\/\\*[\\s\\S]*?\\*\\/)|(?<string>"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|\`(?:[^\`\\\\]|\\\\.)*\`)|(?<keyword>\\b(?:${jstsKeywords})\\b)|(?<builtin>\\b(?:${jstsBuiltins})\\b)|(?<literal>\\b(?:true|false|null|undefined|NaN|Infinity)\\b)|(?<number>(?<![A-Za-z_])\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)`,
       "gm",
     ),
-    COMMON_CLASSES,
+    { ...COMMON_CLASSES, builtin: "hl-literal" },
   ),
 };
 
@@ -216,14 +288,52 @@ const go: Language = {
 };
 
 // ── HTML ────────────────────────────────────────────────────────────────
+// Tokenize HTML alone — used outside <style> / <script> body regions.
+const htmlOnly = (s: string) => tokenize(
+  s,
+  /(?<comment><!--[\s\S]*?-->)|(?<string>"[^"]*"|'[^']*')|(?<tag><\/?[A-Za-z][\w-]*|>|\/>)|(?<attr>\b[A-Za-z-]+(?==))/g,
+  COMMON_CLASSES,
+);
+
 const html: Language = {
   id: "html",
   name: "HTML",
-  highlight: (s) => tokenize(
-    s,
-    /(?<comment><!--[\s\S]*?-->)|(?<string>"[^"]*"|'[^']*')|(?<tag><\/?[A-Za-z][\w-]*|>|\/>)|(?<attr>\b[A-Za-z-]+(?==))/g,
-    COMMON_CLASSES,
-  ),
+  highlight: (s) => {
+    // Locate every <style>…</style> and <script>…</script> body. Highlight
+    // those bodies with the embedded language; highlight everything else
+    // (including the wrapping tags themselves) as plain HTML. Then
+    // concatenate the rendered HTML strings in document order.
+    type Block = { bodyStart: number; bodyEnd: number; lang: Language };
+    const blocks: Block[] = [];
+    const collect = (re: RegExp, lang: Language) => {
+      let m: RegExpExecArray | null;
+      const r = new RegExp(re.source, re.flags);
+      while ((m = r.exec(s)) !== null) {
+        const body = m[1];
+        if (body === undefined) continue;
+        // Absolute body start = match start + offset of body within match.
+        const localBodyStart = m[0].indexOf(body);
+        blocks.push({
+          bodyStart: m.index + localBodyStart,
+          bodyEnd: m.index + localBodyStart + body.length,
+          lang,
+        });
+      }
+    };
+    collect(/<style[^>]*>([\s\S]*?)<\/style>/gi, css);
+    collect(/<script[^>]*>([\s\S]*?)<\/script>/gi, jsts);
+    blocks.sort((a, b) => a.bodyStart - b.bodyStart);
+
+    let result = "";
+    let pos = 0;
+    for (const b of blocks) {
+      if (b.bodyStart > pos) result += htmlOnly(s.slice(pos, b.bodyStart));
+      result += b.lang.highlight(s.slice(b.bodyStart, b.bodyEnd));
+      pos = b.bodyEnd;
+    }
+    if (pos < s.length) result += htmlOnly(s.slice(pos));
+    return result;
+  },
 };
 
 // ── CSS ─────────────────────────────────────────────────────────────────
@@ -280,4 +390,42 @@ export const LANGUAGES: Language[] = [
 export function highlightAs(text: string, langId: string): string {
   const lang = LANGUAGES.find((l) => l.id === langId) ?? plain;
   return lang.highlight(text);
+}
+
+/**
+ * Best-guess language ID from the buffer's content. Heuristic — first
+ * non-blank line characteristics + a couple of whole-buffer shape checks.
+ * Returns "plain" when no pattern matches confidently. The picker still
+ * lets the user override if the guess is wrong.
+ */
+export function detectLanguage(text: string): string {
+  const sample = text.slice(0, 2000);
+  if (sample.trim().length === 0) return "plain";
+  const firstLine = (sample.split("\n").find((l) => l.trim().length > 0) ?? "").trim();
+  const lower = firstLine.toLowerCase();
+
+  if (firstLine.startsWith("#!")) {
+    if (lower.includes("python")) return "python";
+    if (lower.includes("node") || lower.includes("deno")) return "jsts";
+    return "bash";
+  }
+  if (lower.startsWith("<!doctype") || lower.startsWith("<html") || lower.startsWith("<?xml")) return "html";
+
+  const trimmed = text.trim();
+  if (
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  ) {
+    if (/"[\w-]+"\s*:/.test(trimmed.slice(0, 500))) return "json";
+  }
+  if (/^(#{1,6} |---$|\* |- |\d+\.\s|>\s)/.test(firstLine)) return "markdown";
+  if (/^(def |class |import |from |if __name__|@\w+)/.test(firstLine)) return "python";
+  if (/^(fun |val |var |package |object |class \w+(\s*:|\s*\())/.test(firstLine)) return "kotlin";
+  if (/^(import|export|const|let|var|function|class|interface|type|async function|require\()/.test(firstLine)) return "jsts";
+  if (/^(fn |use |mod |struct |enum |impl |pub |#!?\[)/.test(firstLine)) return "rust";
+  if (/^(package |import |func )/.test(firstLine)) return "go";
+  if (/^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|WITH|BEGIN)\b/i.test(firstLine)) return "sql";
+  if (/(?:^|\n)([.#]?[A-Za-z][\w-]*|::?[\w-]+|@\w+)[\w\s.,#:>-]*\{/.test(sample.slice(0, 800))) return "css";
+  if (/(?:^|\n)[\w-]+:\s+\S/.test(sample.slice(0, 500))) return "yaml";
+  return "plain";
 }
