@@ -1656,8 +1656,25 @@ class MainActivity : AppCompatActivity() {
             val canAddToChainmarks = !entry.isPrivate &&
                 session != null &&
                 chainmarkController.isSetUp(session.address)
+            val canFetch = if (entry.isPrivate) !entry.dataMapId.isNullOrBlank()
+                           else entry.address.length == 64
 
             val actions = mutableListOf<Pair<String, () -> Unit>>()
+            if (canFetch) {
+                actions += "Fetch" to {
+                    // Close the history sheet so the result card is visible.
+                    dialog.dismiss()
+                    if (entry.isPrivate) {
+                        retrievePrivateEtch(entry.dataMapId!!)
+                    } else {
+                        // Reuse the public-fetch flow (loading state, opHelper,
+                        // displayFetchedData) by feeding the address through
+                        // the input it already reads from.
+                        binding.addressInput.setText(entry.address)
+                        retrievePaste()
+                    }
+                }
+            }
             if (canAddToChainmarks) {
                 actions += "Add to chainmarks" to {
                     val s = session!!
@@ -3217,6 +3234,9 @@ class MainActivity : AppCompatActivity() {
             address,
             "${detected.mimeType}\n$sizeStr",
         )
+        // Binary preview is just mime/size \u2014 fullscreen-expanding it isn't
+        // useful, so suppress the hint that showResult turned on.
+        binding.resultExpandHint.visibility = View.GONE
         showStatus("Retrieved ${detected.extension.uppercase()} \u2022 $sizeStr")
 
         // Replace "Copy Content" with "Save to Downloads"
@@ -3600,6 +3620,10 @@ class MainActivity : AppCompatActivity() {
         binding.copyAddressBtn.visibility = View.VISIBLE
         binding.shareButton.visibility = View.VISIBLE
         binding.resultContent.visibility = View.VISIBLE
+        // Show the double-tap hint only when there's actual text to expand.
+        // Binary results call showResult with mime/size strings that aren't
+        // worth fullscreen-viewing, so hide the hint there too.
+        binding.resultExpandHint.visibility = if (content.isNotBlank()) View.VISIBLE else View.GONE
         binding.resultImage.visibility = View.GONE
         binding.resultImage.setImageBitmap(null)
         // Reset copy content button in case it was replaced by Save

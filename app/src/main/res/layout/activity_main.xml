@@ -432,6 +432,16 @@
                         android:maxLines="20"
                         android:ellipsize="end" />
 
+                    <TextView
+                        android:id="@+id/resultExpandHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="double-tap to expand"
+                        android:textColor="@color/text_muted"
+                        android:textSize="11sp"
+                        android:textStyle="italic"
+                        android:layout_marginTop="4dp" />
+
                     <!-- Action buttons -->
                     <LinearLayout
                         android:layout_width="match_parent"
