@@ -15,6 +15,9 @@ export type FullscreenEditorOpts = {
   initialText: string;
   editable: boolean;
   title?: string;
+  /** Override the auto-detected language. Lets a caller carry an
+   *  inline-picked syntax over when opening fullscreen. */
+  initialLanguage?: string;
   onCommit?: (text: string) => void;
 };
 
@@ -57,8 +60,10 @@ export function openFullscreenEditor(opts: FullscreenEditorOpts): void {
     langSelect.appendChild(o);
   }
   // Auto-detect from the buffer's first non-blank line. Plain unless the
-  // heuristic is confident — the user can override via the picker.
-  langSelect.value = detectLanguage(opts.initialText);
+  // heuristic is confident — the user can override via the picker. If the
+  // caller passed initialLanguage (e.g. respecting an inline pick from
+  // a fetch result), use that instead.
+  langSelect.value = opts.initialLanguage ?? detectLanguage(opts.initialText);
   bar.appendChild(langSelect);
 
   const saveBtn = document.createElement("button");

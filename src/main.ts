@@ -769,6 +769,43 @@ $("addByAddrBtn").addEventListener("click", async () => {
   }
 });
 
+// Fetch by address — paste any 64-hex Autonomi address and read it back.
+// Mirrors the mobile Fetch field. Reuses fetchInto() so content detection +
+// rendering (envelope / text / image / binary) match chainmark previews.
+async function runFetchByAddress(): Promise<void> {
+  const input = $<HTMLInputElement>("fetchAddr");
+  const btn = $<HTMLButtonElement>("fetchBtn");
+  const row = $<HTMLDivElement>("fetchResultRow");
+
+  const addr = input.value.trim().toLowerCase().replace(/^0x/, "");
+  row.querySelectorAll(".fetch-result").forEach((el) => el.remove());
+  if (!/^[0-9a-f]{64}$/.test(addr)) {
+    const out = document.createElement("div");
+    out.className = "fetch-result";
+    appendError(out, "Invalid address (need 64 hex chars).");
+    addCloseButton(out);
+    row.appendChild(out);
+    return;
+  }
+
+  btn.disabled = true;
+  try {
+    await fetchInto(row, addr, "");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$("fetchBtn").addEventListener("click", () => {
+  void runFetchByAddress();
+});
+$("fetchAddr").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    void runFetchByAddress();
+  }
+});
+
 $("toggleKey").addEventListener("click", () => {
   const inp = $<HTMLInputElement>("key");
   const btn = $("toggleKey");
@@ -811,6 +848,8 @@ $("resetView").addEventListener("click", () => {
   $<HTMLInputElement>("etchPrivate").checked = false;
   setEtchStatus("");
   $("etchResult").innerHTML = "";
+
+  $<HTMLInputElement>("fetchAddr").value = "";
 
   setStatus("connectStatus", "");
   setStatus("status", "");
@@ -1175,12 +1214,33 @@ function renderText(parent: HTMLElement, title: string, content: string): void {
   }
   select.value = "plain";
   langRow.appendChild(select);
+
+  // Expand-to-fullscreen — read-only viewer, carries over the picked syntax.
+  // Mirrors the etch input's dblclick-to-expand on the read side.
+  const expandBtn = document.createElement("button");
+  expandBtn.type = "button";
+  expandBtn.className = "outlined hl-expand-btn";
+  expandBtn.title = "Open fullscreen viewer";
+  expandBtn.textContent = "⤢";
+  langRow.appendChild(expandBtn);
+
   parent.appendChild(langRow);
 
   const pre = document.createElement("pre");
   pre.className = "fetch-text";
   pre.textContent = content;
   parent.appendChild(pre);
+
+  const openFullscreen = () => {
+    openFullscreenEditor({
+      initialText: content,
+      editable: false,
+      title: title || undefined,
+      initialLanguage: select.value,
+    });
+  };
+  expandBtn.addEventListener("click", openFullscreen);
+  pre.addEventListener("dblclick", openFullscreen);
 
   select.addEventListener("change", () => {
     pre.innerHTML = highlightAs(content, select.value);

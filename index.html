@@ -67,6 +67,15 @@
         <div id="etchResult"></div>
       </section>
 
+      <section class="etch-panel">
+        <h2>Fetch an etch <span class="info" data-tip="Paste a 64-hex Autonomi address to retrieve any public etch. No wallet needed.">i</span></h2>
+        <div class="title-row">
+          <input id="fetchAddr" type="text" placeholder="Address (64 hex)…" autocomplete="off" spellcheck="false" />
+          <button id="fetchBtn">Fetch</button>
+        </div>
+        <div id="fetchResultRow"></div>
+      </section>
+
       <details class="section-collapse">
         <summary class="section-title-summary">Private etches <span class="info" data-tip="Stored on this device only. Encrypted at rest with a key derived from your wallet signature. If you lose access to the wallet (no seed phrase, no recovery), the encryption key cannot be re-derived and the entries become permanently unreadable. There is no server backup.">i</span></summary>
         <div id="privateList" class="results"></div>
