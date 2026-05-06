@@ -1,6 +1,7 @@
 package com.autonomi.antpaste
 
 import android.app.Application
+import android.system.Os
 import android.util.Log
 import com.autonomi.antpaste.wallet.WalletSession
 import com.autonomi.antpaste.wallet.WalletSigner
@@ -32,6 +33,15 @@ class EtchitApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // ant-core 0.2.3's `data_dir()` calls `home_dir().unwrap()` on Linux
+        // when XDG_DATA_HOME is unset — Android sets neither HOME nor
+        // XDG_DATA_HOME by default, so the unwrap panics with HomeDirNotFound
+        // the first time anything in the FFI builds a Client. Point HOME at
+        // the app-private data dir so the platform-derived `~/.local/share/ant`
+        // resolves to a path we can actually write to. Must run before any
+        // FFI call (logger init, Client.connect, etc.).
+        Os.setenv("HOME", filesDir.absolutePath, true)
 
         setupLogger()
 
