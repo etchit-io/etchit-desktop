@@ -9,9 +9,9 @@ crate-type = ["cdylib", "staticlib", "lib"]
 [dependencies]
 # Pinned to the exact ant-client revision the shipping libant_ffi.so was
 # built against. Bump deliberately (see docs/FFI_BUILD.md) when upgrading.
-ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "8d43c3b" }
-ant-node = "=0.11.0"
-evmlib = "=0.8.0"
+ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "6cada1d" }
+ant-node = "=0.11.1"
+evmlib = "=0.8.1"
 # Direct deps so we can resolve hierarchical DataMaps in data_get_public
 # (ant-core's data_download() doesn't, only ant-core's file_download() does).
 self_encryption = "=0.35.0"

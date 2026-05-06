@@ -95,7 +95,7 @@ scripts/build-ffi.sh             # verify only
 scripts/build-ffi.sh --swap      # rebuild, then drop into jniLibs
 ```
 
-Everything is pinned and vendored under `ant-sdk/`. See
+Everything is pinned and vendored under `ffi/`. See
 [`docs/FFI_BUILD.md`](docs/FFI_BUILD.md) for toolchain requirements,
 version pins, and how to upgrade.
 

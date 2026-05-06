@@ -1104,7 +1104,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_ant_ffi_checksum_method_client_prepare_file_upload() != 8653.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_ant_ffi_checksum_method_client_prepare_public_upload() != 2178.toShort()) {
+    if (lib.uniffi_ant_ffi_checksum_method_client_prepare_public_upload() != 32998.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_ant_ffi_checksum_method_client_wallet_approve() != 45082.toShort()) {
@@ -1618,11 +1618,12 @@ public interface ClientInterface {
     /**
      * Prepare a public data upload for external signing.
      *
-     * Encrypts the data into content chunks AND adds the serialized data-map
-     * as its own paid chunk so that `finalize_public_upload` can publish
-     * everything in one shot. The returned `data_map_address` is the
-     * content-addressed address where the data-map chunk will live — anyone
-     * who knows that address can retrieve the original data.
+     * Wraps upstream's `data_prepare_upload_with_visibility(_, Public)`,
+     * which encrypts the data into content chunks and bundles the serialized
+     * data-map as an additional paid chunk in the same wave batch. The
+     * returned `data_map_address` is the content-addressed address where
+     * the data-map chunk will live — anyone who knows that address can
+     * retrieve the original data.
      */
     suspend fun `preparePublicUpload`(`data`: kotlin.ByteArray): PreparePublicUploadResult
     
@@ -2067,11 +2068,12 @@ open class Client: Disposable, AutoCloseable, ClientInterface
     /**
      * Prepare a public data upload for external signing.
      *
-     * Encrypts the data into content chunks AND adds the serialized data-map
-     * as its own paid chunk so that `finalize_public_upload` can publish
-     * everything in one shot. The returned `data_map_address` is the
-     * content-addressed address where the data-map chunk will live — anyone
-     * who knows that address can retrieve the original data.
+     * Wraps upstream's `data_prepare_upload_with_visibility(_, Public)`,
+     * which encrypts the data into content chunks and bundles the serialized
+     * data-map as an additional paid chunk in the same wave batch. The
+     * returned `data_map_address` is the content-addressed address where
+     * the data-map chunk will live — anyone who knows that address can
+     * retrieve the original data.
      */
     @Throws(ClientException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")

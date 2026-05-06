@@ -21,7 +21,7 @@ set -euo pipefail
 # --- config ------------------------------------------------------------------
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FFI_DIR="$REPO_ROOT/ant-sdk/ffi/rust"
+FFI_DIR="$REPO_ROOT/ffi/rust"
 JNI_DIR="$REPO_ROOT/app/src/main/jniLibs"
 BINDINGS_DST="$REPO_ROOT/app/src/main/java/uniffi/ant_ffi/ant_ffi.kt"
 SYMBOLS_REF="$JNI_DIR/arm64-v8a/SYMBOLS.reference.txt"
@@ -138,14 +138,16 @@ trap 'rm -f "$NEW_SYMBOLS"; rm -rf "$SCRATCH_DIR"' EXIT
 NEW_BINDINGS="$SCRATCH_DIR/uniffi/ant_ffi/ant_ffi.kt"
 [[ -f "$NEW_BINDINGS" ]] || fail "uniffi-bindgen produced no output" 2
 
-# Filter-diff the bindings: the internal checksum constants shift on every
-# build even when the FFI contract is unchanged, so we diff structurally.
+# Filter-diff the bindings: internal checksum constants shift on every
+# build even when the FFI contract is unchanged, and KDoc text changes
+# (propagated from Rust doc comments) aren't structural — strip both so
+# we only fail on real shape changes.
 BINDING_DIFF="$(mktemp)"
 trap 'rm -f "$NEW_SYMBOLS" "$BINDING_DIFF"; rm -rf "$SCRATCH_DIR"' EXIT
 
 diff -u "$BINDINGS_DST" "$NEW_BINDINGS" \
   | grep -E '^[-+][^-+]' \
-  | grep -vE 'checksum|toShort\(\)' > "$BINDING_DIFF" || true
+  | grep -vE 'checksum|toShort\(\)|^[-+][[:space:]]*\*' > "$BINDING_DIFF" || true
 
 if [[ -s "$BINDING_DIFF" ]]; then
   echo "binding structural diff (existing -> new):"

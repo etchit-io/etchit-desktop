@@ -1,3 +1,3 @@
 # Rust build output — ~8 GB on a clean release build.
-ffi/rust/target/
+rust/target/
 **/*.rs.bk

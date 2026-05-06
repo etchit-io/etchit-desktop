@@ -1,12 +1,12 @@
-# ant-sdk (trimmed fork)
+# ffi (vendored from ant-sdk)
 
-This is a trimmed vendored copy of [WithAutonomi/ant-sdk](https://github.com/WithAutonomi/ant-sdk),
+Trimmed vendored copy of [WithAutonomi/ant-sdk](https://github.com/WithAutonomi/ant-sdk),
 kept only because we apply local patches to the Rust FFI crate under
-`ffi/rust/ant-ffi/`.
+`rust/ant-ffi/`. Built into `libant_ffi.so` by `scripts/build-ffi.sh`.
 
 ## What's here
 
-- `ffi/rust/` — the `ant-ffi` Cargo workspace. This is what
+- `rust/` — the `ant-ffi` Cargo workspace. This is what
   `scripts/build-ffi.sh` compiles into `libant_ffi.so`.
 - `.reference-source/` — preserved snapshot of the upstream FFI source
   the original shipping `libant_ffi.so` was built from. Read-only. Used
@@ -30,8 +30,8 @@ upstream separately rather than re-vendoring them here.
 ## Local patches vs. upstream
 
 Upstream reference point: `WithAutonomi/ant-sdk@bf541cc` (as of vendoring
-on 2026-04-21). Our diffs live in `ffi/rust/ant-ffi/src/` and
-`ffi/rust/ant-ffi/Cargo.toml`. The main deltas:
+on 2026-04-21). Our diffs live in `rust/ant-ffi/src/` and
+`rust/ant-ffi/Cargo.toml`. The main deltas:
 
 - `Client::prepare_public_upload`, `Client::finalize_public_upload`,
   `Client::peer_count` added.
@@ -45,9 +45,9 @@ on 2026-04-21). Our diffs live in `ffi/rust/ant-ffi/src/` and
 - `self_encryption` and `xor_name` promoted to direct deps so the
   hierarchical-DataMap resolver in `data_get_public` / `data_get_private`
   (calls `get_root_data_map_parallel` before `data_download`) compiles.
-- `ant-core` pinned as `git + rev = "8d43c3b"`; `ant-node = "=0.11.0"`;
-  `evmlib = "=0.8.0"`; `self_encryption = "=0.35.0"`; `xor_name = "=5.0.0"`.
-  This pin pulls in saorsa-core 0.24.0's MASQUE relay support — peers
+- `ant-core` pinned as `git + rev = "6cada1d"` (v0.2.3); `ant-node = "=0.11.1"`;
+  `evmlib = "=0.8.1"`; `self_encryption = "=0.35.0"`; `xor_name = "=5.0.0"`.
+  This pin pulls in saorsa-core 0.24.2's MASQUE relay support — peers
   behind NAT advertise relay addresses so clients dial those first,
   cutting DIAL_TIMEOUT cascades on mobile / CGNAT.
 

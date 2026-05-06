@@ -61,14 +61,14 @@ least one of these applies:
 
 ## How to rebuild
 
-Everything needed to rebuild from source is vendored in `ant-sdk/`. There
+Everything needed to rebuild from source is vendored in `ffi/`. There
 are no sibling-checkout requirements and no floating deps.
 
 ### Prerequisites
 
 | Tool | Version | Install |
 | --- | --- | --- |
-| Rust toolchain | `1.94.1` | pinned in `ant-sdk/ffi/rust/rust-toolchain.toml`; `rustup` auto-installs on first build |
+| Rust toolchain | `1.94.1` | pinned in `ffi/rust/rust-toolchain.toml`; `rustup` auto-installs on first build |
 | Android targets | `aarch64-linux-android`, `x86_64-linux-android` | pinned in `rust-toolchain.toml` |
 | `cargo-ndk` | `≥ 4.1` | `cargo install cargo-ndk` |
 | `uniffi-bindgen` binary | `0.29.4` (must match `uniffi = "0.29.4"` in `ant-ffi/Cargo.toml`) | upstream has no published CLI crate — install from the uniffi-rs example: `cargo install --git https://github.com/mozilla/uniffi-rs --tag v0.29.4 --path examples/app/uniffi-bindgen-cli` (or clone locally then `cargo install --path <repo>/examples/app/uniffi-bindgen-cli`) |
@@ -93,12 +93,12 @@ install, and smoke-test before committing.
 
 | Pin | Where | Value |
 | --- | --- | --- |
-| `ant-core` | `ant-sdk/ffi/rust/ant-ffi/Cargo.toml` | `git + rev = "8d43c3b"` |
-| `ant-node` | same | `= "0.11.0"` (mainnet release; pulls saorsa-core 0.24.0 + saorsa-transport 0.33.0 transitively) |
-| `evmlib` | same | `= "0.8.0"` |
+| `ant-core` | `ffi/rust/ant-ffi/Cargo.toml` | `git + rev = "6cada1d"` (ant-core v0.2.3, 2026-05-06) |
+| `ant-node` | same | `= "0.11.1"` (mainnet release; pulls saorsa-core 0.24.2 transitively) |
+| `evmlib` | same | `= "0.8.1"` |
 | `self_encryption` | same | `= "0.35.0"` (needed for `get_root_data_map_parallel` in `data_get_public`/`data_get_private`) |
 | `xor_name` | same | `= "5.0.0"` (transitive via `self_encryption`; promoted to direct dep so the `XorName` type in the hierarchical-resolver closure resolves) |
-| `uniffi` | `ant-sdk/ffi/rust/Cargo.toml` | `"0.29.4"` (workspace) |
+| `uniffi` | `ffi/rust/Cargo.toml` | `"0.29.4"` (workspace) |
 | Rust | `rust-toolchain.toml` | `1.94.1` |
 | NDK | `scripts/build-ffi.sh` | `27.0.12077973` |
 | `cargo-ndk` | `scripts/build-ffi.sh` | `≥ 4.1` |
@@ -109,7 +109,7 @@ update this table in the same commit as the `.so` swap.
 
 ### Production-only
 
-`ant-sdk/` ships production-only:
+`ffi/` ships production-only:
 
 - `Client::connect_local` is removed (was only for a local devnet this
   app never connects to).
@@ -120,10 +120,10 @@ update this table in the same commit as the `.so` swap.
 
 ### Trim vs. upstream
 
-`ant-sdk/` is a trimmed copy of `WithAutonomi/ant-sdk@bf541cc`. Only
-`ffi/rust/` is kept; the standalone `antd` daemon, other-language SDKs,
+`ffi/` is a trimmed copy of `WithAutonomi/ant-sdk@bf541cc`. Only
+the FFI Rust crate is kept; the standalone `antd` daemon, other-language SDKs,
 upstream CI, and docs are removed because nothing in this app
-references them. See `ant-sdk/README.md` for the exact list of pruned
+references them. See `ffi/README.md` for the exact list of pruned
 directories.
 
 **Behavior changes worth noting:**
@@ -156,7 +156,7 @@ The shipping FFI uses a small handful of overrides on top of stock
 - `self_encryption` and `xor_name` are promoted to direct deps to make
   the resolver's closure types resolve.
 
-The current pin (`ant-core@8d43c3b`, `ant-node=0.11.0`) also pulls in
-saorsa-core 0.24.0's MASQUE relay support, so peers behind NAT advertise
+The current pin (`ant-core@6cada1d`, `ant-node=0.11.1`) pulls in
+saorsa-core 0.24.2's MASQUE relay support, so peers behind NAT advertise
 relay addresses to the DHT and clients dial those first. This dramatically
 reduces DIAL_TIMEOUT cascades on mobile / CGNAT.

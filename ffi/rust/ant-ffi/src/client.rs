@@ -8,7 +8,7 @@ use zeroize::Zeroize;
 
 use ant_core::data::{
     Client as CoreClient, ClientConfig, CoreNodeConfig, ExternalPaymentInfo, MAX_WIRE_MESSAGE_SIZE,
-    MultiAddr, NodeMode, P2PNode, PaymentIntent, PreparedUpload, compute_address,
+    MultiAddr, NodeMode, P2PNode, PaymentIntent, PreparedUpload, Visibility,
 };
 
 use crate::data::{format_payment_mode, parse_payment_mode};
@@ -345,46 +345,36 @@ impl Client {
 
     /// Prepare a public data upload for external signing.
     ///
-    /// Encrypts the data into content chunks AND adds the serialized data-map
-    /// as its own paid chunk so that `finalize_public_upload` can publish
-    /// everything in one shot. The returned `data_map_address` is the
-    /// content-addressed address where the data-map chunk will live — anyone
-    /// who knows that address can retrieve the original data.
+    /// Wraps upstream's `data_prepare_upload_with_visibility(_, Public)`,
+    /// which encrypts the data into content chunks and bundles the serialized
+    /// data-map as an additional paid chunk in the same wave batch. The
+    /// returned `data_map_address` is the content-addressed address where
+    /// the data-map chunk will live — anyone who knows that address can
+    /// retrieve the original data.
     pub async fn prepare_public_upload(
         &self,
         data: Vec<u8>,
     ) -> Result<PreparePublicUploadResult, ClientError> {
-        let mut prepared = self.inner.data_prepare_upload(Bytes::from(data)).await?;
+        let prepared = self
+            .inner
+            .data_prepare_upload_with_visibility(Bytes::from(data), Visibility::Public)
+            .await?;
 
-        let data_map_serialized = rmp_serde::to_vec(&prepared.data_map).map_err(|e| {
-            ClientError::InternalError { reason: format!("serialize data map: {e}") }
-        })?;
-        let data_map_address = hex::encode(compute_address(&Bytes::from(data_map_serialized.clone())));
-
-        // Only the WaveBatch payment path is supported — etchit pastes never
-        // hit the merkle threshold (64+ chunks). Append the data-map chunk to
-        // the wave batch so `finalize_public_upload` can publish it in the
-        // same external-signer transaction as the content chunks.
-        match &mut prepared.payment_info {
-            ExternalPaymentInfo::WaveBatch {
-                prepared_chunks,
-                payment_intent,
-            } => {
-                if let Some(data_map_chunk) = self
-                    .inner
-                    .prepare_chunk_payment(Bytes::from(data_map_serialized))
-                    .await?
-                {
-                    prepared_chunks.push(data_map_chunk);
-                    *payment_intent = PaymentIntent::from_prepared_chunks(prepared_chunks);
-                }
-            }
-            ExternalPaymentInfo::Merkle { .. } => {
-                return Err(ClientError::InvalidInput {
-                    reason: "merkle payment path not supported by prepare_public_upload".into(),
-                });
-            }
+        // Etchit pastes never hit the merkle threshold (64+ chunks); reject
+        // defensively if upstream ever routes an in-memory public upload
+        // through the merkle path.
+        if matches!(prepared.payment_info, ExternalPaymentInfo::Merkle { .. }) {
+            return Err(ClientError::InvalidInput {
+                reason: "merkle payment path not supported by prepare_public_upload".into(),
+            });
         }
+
+        let data_map_address = prepared
+            .data_map_address
+            .map(hex::encode)
+            .ok_or_else(|| ClientError::InternalError {
+                reason: "data_map_address missing on public PreparedUpload".into(),
+            })?;
 
         let intent = wave_batch_payment_intent(&prepared)?;
         let payments = payment_entries(intent);
@@ -419,14 +409,15 @@ impl Client {
         tx_hashes: HashMap<String, String>,
     ) -> Result<PublicUploadResult, ClientError> {
         let prepared = self.take_pending(&upload_id).await?;
-
-        let data_map_serialized = rmp_serde::to_vec(&prepared.data_map).map_err(|e| {
-            ClientError::InternalError { reason: format!("serialize data map: {e}") }
-        })?;
-        let address = hex::encode(compute_address(&Bytes::from(data_map_serialized)));
-
         let tx_hash_map = parse_tx_hash_map(&tx_hashes)?;
         let result = self.inner.finalize_upload(prepared, &tx_hash_map).await?;
+
+        let address = result
+            .data_map_address
+            .map(hex::encode)
+            .ok_or_else(|| ClientError::InternalError {
+                reason: "data_map_address missing from public FileUploadResult".into(),
+            })?;
 
         Ok(PublicUploadResult {
             address,
