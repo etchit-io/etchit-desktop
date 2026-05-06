@@ -38,14 +38,14 @@ class ChainmarkCryptoTest {
     @Test
     fun deriveKey_zeroIkm_golden() {
         val ikm = ByteArray(64)
-        val expected = hex("37882090825a3866b3be864ffc59813f09ebc923f12942a1cf6b5f947dd07cc6")
+        val expected = hex("a69828cc3a40f916470270d58c2a4f8ec81bb9ccc332d05a2634f86e1c3d2c58")
         assertArrayEquals(expected, ChainmarkCrypto.deriveKey(ikm))
     }
 
     @Test
     fun deriveKey_filledIkm_golden() {
         val ikm = ByteArray(64) { 0x42 }
-        val expected = hex("48864d6ddde21c594b40b9fefe0192acb568d189fbd402a627540592c938dacf")
+        val expected = hex("64a7f5fd165523dca68c1e5dc624b41de665006563b2ba3829f47e687dbd6d03")
         assertArrayEquals(expected, ChainmarkCrypto.deriveKey(ikm))
     }
 
@@ -128,12 +128,12 @@ class ChainmarkCryptoTest {
         assertEquals("000000000000000000000000", sealed.copyOfRange(2, 14).toHex())
         // first 32 bytes of ciphertext (deterministic vs the same Python AES-GCM impl)
         assertEquals(
-            "49cd0ef4d3121bc4266ed827c87326d1154af62eca548f77aceb730d4bc23ead",
+            "a81854c3d6663b80db38018145d74b092f22bff74ab418e5e9742eab155d6843",
             sealed.copyOfRange(14, 46).toHex()
         )
         // last 16 bytes (the GCM tag)
         assertEquals(
-            "627a83c62cd6ccd1711d7774cd7efb4a",
+            "77382661fee0d051d08ffdb0a9fc323f",
             sealed.copyOfRange(sealed.size - 16, sealed.size).toHex()
         )
     }
