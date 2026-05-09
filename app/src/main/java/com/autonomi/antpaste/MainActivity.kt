@@ -49,6 +49,7 @@ import com.autonomi.antpaste.chainmark.ChainmarkKeyManager
 import com.autonomi.antpaste.chainmark.WireEntry
 import com.autonomi.antpaste.net.ConnectionManager
 import com.autonomi.antpaste.net.ProgressTail
+import com.autonomi.antpaste.ui.ResultCardView
 import com.autonomi.antpaste.ui.WalletModalHost
 import com.autonomi.antpaste.ui.showFullScreenTextDialog
 import com.autonomi.antpaste.vault.EtchSigner
@@ -133,6 +134,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var prefs: SharedPreferences
     private lateinit var encryptedPrefs: SharedPreferences
+    private lateinit var resultCard: ResultCardView
 
     private val attachTextFileLauncher: ActivityResultLauncher<Array<String>> =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -329,6 +331,14 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         prefs = getSharedPreferences("ant_paste", Context.MODE_PRIVATE)
+        resultCard = ResultCardView(
+            activity = this,
+            binding = binding,
+            onShowStatus = ::showStatus,
+            onCopy = ::copyToClipboard,
+            onHaptic = ::hapticSuccess,
+            onBackupDetected = ::promptRestoreBackup,
+        )
 
         val masterKey = MasterKey.Builder(this)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -623,28 +633,6 @@ class MainActivity : AppCompatActivity() {
                 .start()
         }
     }
-
-    private fun animateResultCard() {
-        val card = binding.resultCard
-        card.alpha = 0f
-        card.translationY = 60f
-        card.scaleX = 0.95f
-        card.scaleY = 0.95f
-        card.visibility = View.VISIBLE
-
-        val anim = AnimatorSet()
-        anim.playTogether(
-            ObjectAnimator.ofFloat(card, "alpha", 0f, 1f).setDuration(400),
-            ObjectAnimator.ofFloat(card, "translationY", 60f, 0f).setDuration(500),
-            ObjectAnimator.ofFloat(card, "scaleX", 0.95f, 1f).setDuration(500),
-            ObjectAnimator.ofFloat(card, "scaleY", 0.95f, 1f).setDuration(500),
-        )
-        anim.interpolator = OvershootInterpolator(0.8f)
-        anim.start()
-
-        hapticSuccess()
-    }
-
     private fun animateButtonPress(view: View) {
         val scaleDown = AnimatorSet().apply {
             playTogether(
@@ -1023,14 +1011,14 @@ class MainActivity : AppCompatActivity() {
                 val displayTitle = title.ifEmpty { "Untitled" }
                 when (result) {
                     is EtchSigner.EtchResult.Public -> {
-                        showResult(displayTitle, result.address, content)
+                        resultCard.show(displayTitle, result.address, content)
                         showStatus("Etched permanently \u2022 ${formatSize(data.size)} \u2022 ${result.chunksStored} chunks")
                         etchHistory.add(result.address, displayTitle)
                     }
                     is EtchSigner.EtchResult.Private -> {
                         val dmId = privateDataStore.save(displayTitle, result.dataMapHex)
                         etchHistory.addPrivate(displayTitle, dmId)
-                        showResult(displayTitle, "Private \u2022 stored on device", content)
+                        resultCard.show(displayTitle, "Private \u2022 stored on device", content)
                         binding.resultAddress.setTextColor(STATUS_GREEN)
                         binding.copyAddressBtn.visibility = View.GONE
                         binding.shareButton.visibility = View.GONE
@@ -1249,14 +1237,14 @@ class MainActivity : AppCompatActivity() {
                 }
                 when (result) {
                     is EtchSigner.EtchResult.Public -> {
-                        showResult(displayTitle, result.address, content)
+                        resultCard.show(displayTitle, result.address, content)
                         showStatus("Etched permanently \u2022 ${formatSize(data.size)} \u2022 ${result.chunksStored} chunks")
                         etchHistory.add(result.address, displayTitle)
                     }
                     is EtchSigner.EtchResult.Private -> {
                         val dmId = privateDataStore.save(displayTitle, result.dataMapHex)
                         etchHistory.addPrivate(displayTitle, dmId)
-                        showResult(displayTitle, "Private \u2022 stored on device", content)
+                        resultCard.show(displayTitle, "Private \u2022 stored on device", content)
                         binding.resultAddress.setTextColor(STATUS_GREEN)
                         binding.copyAddressBtn.visibility = View.GONE
                         binding.shareButton.visibility = View.GONE
@@ -1412,7 +1400,7 @@ class MainActivity : AppCompatActivity() {
                     nativeClient!!.dataGetPublic(address)
                 }
 
-                displayFetchedData(data, address)
+                resultCard.displayFetched(data, address)
 
             } catch (e: CancellationException) {
                 showStatus("Cancelled")
@@ -1673,8 +1661,8 @@ class MainActivity : AppCompatActivity() {
                         retrievePrivateEtch(entry.dataMapId!!)
                     } else {
                         // Reuse the public-fetch flow (loading state, opHelper,
-                        // displayFetchedData) by feeding the address through
-                        // the input it already reads from.
+                        // resultCard.displayFetched) by feeding the address
+                        // through the input it already reads from.
                         binding.addressInput.setText(entry.address)
                         retrievePaste()
                     }
@@ -2872,7 +2860,7 @@ class MainActivity : AppCompatActivity() {
 
                 when (result) {
                     is EtchSigner.EtchResult.Public -> {
-                        showResult("Backup", result.address, "")
+                        resultCard.show("Backup", result.address, "")
                         binding.resultContent.text =
                             "Your private etches are backed up.\n\n" +
                             "Save this address — with your password it's your recovery key on any device."
@@ -3157,7 +3145,7 @@ class MainActivity : AppCompatActivity() {
                 val raw = data.toString(Charsets.UTF_8)
                 val (title, content) = parseEnvelope(raw)
 
-                showResult(
+                resultCard.show(
                     title = title.ifEmpty { "Retrieved" },
                     address = "Private \u2022 stored on device",
                     content = content,
@@ -3183,106 +3171,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
-    // ── Content Display ──────────────────────────────────────────────
-
-    private fun displayFetchedData(data: ByteArray, address: String) {
-        val detected = ContentDetector.detect(data)
-        val sizeStr = PasteUtils.formatSize(data.size)
-
-        when (detected.type) {
-            ContentDetector.ContentType.ETCH_ENVELOPE -> {
-                val raw = data.toString(Charsets.UTF_8)
-                val (title, content) = parseEnvelope(raw)
-                showResult(title.ifEmpty { "Retrieved" }, address, content)
-                showStatus("Retrieved \u2022 $sizeStr")
-            }
-            ContentDetector.ContentType.IMAGE -> {
-                val bitmap = android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size)
-                if (bitmap != null) {
-                    showResult("Image", address, "")
-                    binding.resultContent.visibility = View.GONE
-                    binding.resultImage.setImageBitmap(bitmap)
-                    binding.resultImage.visibility = View.VISIBLE
-                    showStatus("Retrieved image \u2022 $sizeStr")
-                } else {
-                    showBinaryResult(data, detected, address, sizeStr)
-                }
-            }
-            ContentDetector.ContentType.TEXT -> {
-                val text = data.toString(Charsets.UTF_8)
-                showResult("Raw text", address, text)
-                showStatus("Retrieved text \u2022 $sizeStr")
-            }
-            ContentDetector.ContentType.BACKUP -> {
-                promptRestoreBackup(data)
-            }
-            ContentDetector.ContentType.BINARY -> {
-                showBinaryResult(data, detected, address, sizeStr)
-            }
-        }
-    }
-
-    /**
-     * Show binary file info in the result card with an explicit Save
-     * button. Data stays in memory — nothing persists unless the user
-     * taps Save. The app never stores fetched content.
-     */
-    private fun showBinaryResult(
-        data: ByteArray,
-        detected: ContentDetector.Result,
-        address: String,
-        sizeStr: String,
-    ) {
-        showResult(
-            "${detected.extension.uppercase()} file",
-            address,
-            "${detected.mimeType}\n$sizeStr",
-        )
-        // Binary preview is just mime/size \u2014 fullscreen-expanding it isn't
-        // useful, so suppress the hint that showResult turned on.
-        binding.resultExpandHint.visibility = View.GONE
-        showStatus("Retrieved ${detected.extension.uppercase()} \u2022 $sizeStr")
-
-        // Replace "Copy Content" with "Save to Downloads"
-        binding.copyContentBtn.text = "Save to Downloads"
-        binding.copyContentBtn.setOnClickListener {
-            val filename = "etchit_${address.take(12)}.${detected.extension}"
-            try {
-                val resolver = contentResolver
-                val values = android.content.ContentValues().apply {
-                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename)
-                    put(android.provider.MediaStore.Downloads.MIME_TYPE, detected.mimeType)
-                    put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
-                }
-                val uri = resolver.insert(
-                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
-                ) ?: throw RuntimeException("Failed to create file")
-
-                resolver.openOutputStream(uri)?.use { it.write(data) }
-
-                values.clear()
-                values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
-                resolver.update(uri, values, null, null)
-
-                Snackbar.make(binding.root, "Saved: $filename", Snackbar.LENGTH_LONG)
-                    .setBackgroundTint(INK_3)
-                    .setTextColor(STATUS_GREEN)
-                    .setAction("Open") {
-                        val openIntent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(uri, detected.mimeType)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        startActivity(Intent.createChooser(openIntent, "Open with"))
-                    }
-                    .setActionTextColor(COPPER)
-                    .show()
-            } catch (e: Exception) {
-                showStatus("Failed to save: ${e.shortMessage()}", isError = true)
-            }
-        }
-    }
-
     // ── Share ──────────────────────────────────────────────────────
 
     private fun shareResult() {
@@ -3311,30 +3199,6 @@ class MainActivity : AppCompatActivity() {
         pendingTextToSave = content
         saveTextLauncher.launch(suggestedName)
     }
-
-    private fun showResult(title: String, address: String, content: String) {
-        binding.resultTitle.text = title
-        binding.resultAddress.text = address
-        binding.resultContent.text = content
-        // Reset all result card state
-        binding.resultAddress.setTextColor(0xFF64b5f6.toInt()) // accent_blue
-        binding.copyAddressBtn.visibility = View.VISIBLE
-        binding.shareButton.visibility = View.VISIBLE
-        binding.resultContent.visibility = View.VISIBLE
-        // Show the double-tap hint only when there's actual text to expand.
-        // Binary results call showResult with mime/size strings that aren't
-        // worth fullscreen-viewing, so hide the hint there too.
-        binding.resultExpandHint.visibility = if (content.isNotBlank()) View.VISIBLE else View.GONE
-        binding.resultImage.visibility = View.GONE
-        binding.resultImage.setImageBitmap(null)
-        // Reset copy content button in case it was replaced by Save
-        binding.copyContentBtn.text = "Copy Content"
-        binding.copyContentBtn.setOnClickListener {
-            copyToClipboard(binding.resultContent.text.toString(), "Content")
-        }
-        animateResultCard()
-    }
-
     private fun showStatus(message: String, isError: Boolean = false) {
         binding.statusMessage.text = message
         binding.statusMessage.setTextColor(
