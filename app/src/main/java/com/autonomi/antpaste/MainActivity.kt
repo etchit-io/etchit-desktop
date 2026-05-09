@@ -53,6 +53,8 @@ import com.autonomi.antpaste.ui.ResultCardView
 import com.autonomi.antpaste.ui.WalletModalHost
 import com.autonomi.antpaste.ui.showFullScreenTextDialog
 import com.autonomi.antpaste.vault.EtchSigner
+import com.autonomi.antpaste.vault.ResumableEtch
+import com.autonomi.antpaste.vault.ResumableEtchStore
 import com.autonomi.antpaste.wallet.EvmRpc
 import com.autonomi.antpaste.wallet.SessionState
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -110,15 +112,8 @@ class MainActivity : AppCompatActivity() {
             "application/x-yaml",
         )
 
-        /** Encrypted-prefs key for the persisted [ResumableEtch] across
-         *  process death. Bumping the suffix forces older payloads to be
-         *  discarded if the schema ever changes incompatibly. */
-        private const val PENDING_ETCH_KEY = "pending_etch_state_v1"
-        /** Discard persisted pending etches older than this. Quotes are
-         *  technically valid for 7-30 days at the node level, but the
-         *  user almost certainly didn't mean to resume a day-old etch —
-         *  the chunks may also have been replicated elsewhere by then. */
-        private const val PENDING_ETCH_MAX_AGE_MS = 24L * 60L * 60L * 1000L
+        // ResumableEtch persistence (encrypted-prefs key, max-age) lives in
+        // ResumableEtchStore now. Constants below are app-level UI concerns.
 
         /** Warmup peer-count target — same as the prior first-touch gate. */
         private const val WARMUP_TARGET_PEERS = 10
@@ -168,163 +163,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var opHelper: OperationHelper
     private var networkInfoJob: Job? = null
     private var progressTailJob: Job? = null
-
-    /**
-     * Held between a failed wallet attempt and a retry. Captures the
-     * FFI-side PreparedEtch (uploadId + quotes) and the user's chosen
-     * session budget so retrying skips the minutes-long quote collection
-     * and the cost dialog. Cleared on success or when the user starts a
-     * fresh etch.
-     */
-    private data class ResumableEtch(
-        val prepared: EtchSigner.PreparedEtch,
-        val approveBudget: BigInteger,
-        val title: String,
-        val content: String,
-        val isBackup: Boolean = false,
-        /** Hash of a prior successful `payForQuotes` for this prepared
-         *  upload, captured the moment the receipt confirmed. When set,
-         *  retryResumableEtch passes it to `signAndFinalize` to skip the
-         *  wallet flow and avoid double-charging. */
-        val paidTxHash: String? = null,
-    )
-    private var resumableEtch: ResumableEtch? = null
-
-    /**
-     * Single-source-of-truth setter for [resumableEtch]. Updates the
-     * in-memory field AND persists to encrypted prefs so a process death
-     * (or Activity destruction) between payment-confirmed and finalize-
-     * complete preserves the `paidTxHash` — without it the retry path
-     * can't skip the wallet flow on resume and the user pays twice.
-     *
-     * [durable] forces a synchronous `commit()` for write paths where the
-     * value MUST be on disk before the next operation (specifically the
-     * paidTxHash capture: if the OS kills the process between the async
-     * apply() and the disk flush, the resume path won't see the hash and
-     * will re-pay). For non-critical updates `apply()` is fine.
-     */
-    private fun setResumableEtch(value: ResumableEtch?, durable: Boolean = false) {
-        resumableEtch = value
-        try {
-            val editor = encryptedPrefs.edit()
-            if (value == null) {
-                editor.remove(PENDING_ETCH_KEY)
-            } else {
-                editor.putString(PENDING_ETCH_KEY, value.toJsonString())
-            }
-            if (durable) editor.commit() else editor.apply()
-        } catch (e: Exception) {
-            // Don't fail the etch flow if persistence breaks — the
-            // in-memory field is still correct, only resume-after-death
-            // is at risk.
-            Log.e("ant-paste", "setResumableEtch persist failed: ${e.message}", e)
-        }
-    }
-
-    /**
-     * Read any persisted pending etch from a prior process. Returns null
-     * if none, malformed, or older than [PENDING_ETCH_MAX_AGE_MS].
-     */
-    private fun loadPendingEtch(): ResumableEtch? {
-        val json = try {
-            encryptedPrefs.getString(PENDING_ETCH_KEY, null)
-        } catch (e: Exception) {
-            Log.w("ant-paste", "loadPendingEtch: encryptedPrefs read failed: ${e.message}")
-            return null
-        } ?: return null
-
-        val parsed = parseResumableEtchJson(json) ?: run {
-            Log.w("ant-paste", "loadPendingEtch: parse failed, clearing")
-            encryptedPrefs.edit().remove(PENDING_ETCH_KEY).apply()
-            return null
-        }
-
-        val ageMs = System.currentTimeMillis() - parsed.prepared.createdAtMs
-        if (ageMs > PENDING_ETCH_MAX_AGE_MS) {
-            Log.i("ant-paste", "loadPendingEtch: discarding stale entry (age=${ageMs / 1000 / 60}m)")
-            encryptedPrefs.edit().remove(PENDING_ETCH_KEY).apply()
-            return null
-        }
-
-        return parsed
-    }
+    private lateinit var resumableEtchStore: ResumableEtchStore
 
     /** Reown AppKit session held by the Application instance — one per process. */
     private val walletSession by lazy {
         (application as EtchitApplication).walletSession
     }
-
-    // ── ResumableEtch JSON persistence ────────────────────────────
-
-    private fun ResumableEtch.toJsonString(): String {
-        val paymentsArr = JSONArray()
-        prepared.payments.forEach { p ->
-            paymentsArr.put(JSONObject().apply {
-                put("quote_hash", p.quoteHash)
-                put("rewards_address", p.rewardsAddress)
-                put("amount", p.amount)
-            })
-        }
-        val preparedJson = JSONObject().apply {
-            put("uploadId", prepared.uploadId)
-            put("totalAmountStr", prepared.totalAmountStr)
-            put("publicAddress", prepared.publicAddress ?: JSONObject.NULL)
-            put("privateDataMap", prepared.privateDataMap ?: JSONObject.NULL)
-            put("isPrivate", prepared.isPrivate)
-            put("dataSize", prepared.dataSize)
-            put("createdAtMs", prepared.createdAtMs)
-            put("payments", paymentsArr)
-        }
-        return JSONObject().apply {
-            put("schema", 1)
-            put("title", title)
-            put("content", content)
-            put("approveBudget", approveBudget.toString())
-            put("isBackup", isBackup)
-            put("paidTxHash", paidTxHash ?: JSONObject.NULL)
-            put("prepared", preparedJson)
-        }.toString()
-    }
-
-    private fun parseResumableEtchJson(json: String): ResumableEtch? = try {
-        val obj = JSONObject(json)
-        val preparedObj = obj.getJSONObject("prepared")
-        val paymentsArr = preparedObj.getJSONArray("payments")
-        val payments = (0 until paymentsArr.length()).map { i ->
-            val p = paymentsArr.getJSONObject(i)
-            uniffi.ant_ffi.PaymentEntry(
-                quoteHash = p.getString("quote_hash"),
-                rewardsAddress = p.getString("rewards_address"),
-                amount = p.getString("amount"),
-            )
-        }
-        val totalAmountStr = preparedObj.getString("totalAmountStr")
-        val prepared = EtchSigner.PreparedEtch(
-            uploadId = preparedObj.getString("uploadId"),
-            payments = payments,
-            totalAmountStr = totalAmountStr,
-            totalAtto = BigInteger(totalAmountStr),
-            publicAddress = preparedObj.optStringOrNull("publicAddress"),
-            privateDataMap = preparedObj.optStringOrNull("privateDataMap"),
-            isPrivate = preparedObj.getBoolean("isPrivate"),
-            dataSize = preparedObj.getInt("dataSize"),
-            createdAtMs = preparedObj.getLong("createdAtMs"),
-        )
-        ResumableEtch(
-            prepared = prepared,
-            approveBudget = BigInteger(obj.getString("approveBudget")),
-            title = obj.getString("title"),
-            content = obj.getString("content"),
-            isBackup = obj.optBoolean("isBackup", false),
-            paidTxHash = obj.optStringOrNull("paidTxHash"),
-        )
-    } catch (e: Exception) {
-        Log.w("ant-paste", "parseResumableEtchJson failed: ${e.message}", e)
-        null
-    }
-
-    private fun JSONObject.optStringOrNull(key: String): String? =
-        if (isNull(key) || !has(key)) null else optString(key).takeIf { it.isNotEmpty() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -351,6 +195,7 @@ class MainActivity : AppCompatActivity() {
 
         etchHistory = EtchHistory(prefs)
         privateDataStore = PrivateDataStore(encryptedPrefs)
+        resumableEtchStore = ResumableEtchStore(encryptedPrefs)
         val walletSignerForChainmark = (application as EtchitApplication).walletSigner
         chainmarkController = ChainmarkController(
             keyManager = ChainmarkKeyManager(encryptedPrefs, walletSignerForChainmark),
@@ -365,14 +210,14 @@ class MainActivity : AppCompatActivity() {
         // Restore any persisted pending etch. The resume Snackbar fires
         // later, in connectToNetwork's success path, once nativeClient
         // is ready.
-        loadPendingEtch()?.let { restored ->
+        resumableEtchStore.loadPersisted()?.let { restored ->
             Log.i(
                 "ant-paste",
                 "MainActivity: restored pending etch — uploadId=${restored.prepared.uploadId} " +
                     "paidTxHash=${restored.paidTxHash ?: "<none>"} " +
                     "ageSec=${(System.currentTimeMillis() - restored.prepared.createdAtMs) / 1000}",
             )
-            resumableEtch = restored
+            resumableEtchStore.restore(restored)
         }
 
         runLegacyCleanup()
@@ -760,7 +605,7 @@ class MainActivity : AppCompatActivity() {
 
                 // If a prior process left a pending etch persisted, offer
                 // to finish it now that we have a live nativeClient.
-                resumableEtch?.let { offerResumeFromPersisted(it) }
+                resumableEtchStore.current?.let { offerResumeFromPersisted(it) }
             } catch (e: TimeoutCancellationException) {
                 Log.e("ant-paste", "Connection timed out after 45s", e)
                 stopStatusPulse()
@@ -952,7 +797,7 @@ class MainActivity : AppCompatActivity() {
 
         // Starting a fresh etch invalidates any previous resumable state —
         // we're about to prepare a new upload with new quotes.
-        setResumableEtch(null)
+        resumableEtchStore.set(null)
 
         storeJob = lifecycleScope.launch {
             opHelper.start("Starting…")
@@ -981,8 +826,8 @@ class MainActivity : AppCompatActivity() {
                                 // of withContext, otherwise a retry would
                                 // approve only one etch worth instead of
                                 // the full session budget.
-                                resumableEtch?.let {
-                                    setResumableEtch(it.copy(approveBudget = budget))
+                                resumableEtchStore.current?.let {
+                                    resumableEtchStore.set(it.copy(approveBudget = budget))
                                 }
                             }
                         },
@@ -992,7 +837,7 @@ class MainActivity : AppCompatActivity() {
                             // valid even if the wallet fails before the
                             // user picks a budget; updated above once they
                             // confirm the cost prompt.
-                            setResumableEtch(ResumableEtch(
+                            resumableEtchStore.set(ResumableEtch(
                                 prepared = prepared,
                                 approveBudget = prepared.totalAtto,
                                 title = title,
@@ -1003,7 +848,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 if (result == null) {
-                    setResumableEtch(null)
+                    resumableEtchStore.set(null)
                     showStatus("Cancelled")
                     return@launch
                 }
@@ -1026,7 +871,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                setResumableEtch(null)
+                resumableEtchStore.set(null)
                 binding.contentInput.text.clear()
                 binding.titleInput.text.clear()
 
@@ -1070,8 +915,8 @@ class MainActivity : AppCompatActivity() {
             // write to a kill-during-async-flush is the exact failure
             // mode the persistence is meant to prevent.
             if (phase is EtchSigner.Progress.PaidAwaitingFinalize) {
-                resumableEtch?.let {
-                    setResumableEtch(it.copy(paidTxHash = phase.txHash), durable = true)
+                resumableEtchStore.current?.let {
+                    resumableEtchStore.set(it.copy(paidTxHash = phase.txHash), durable = true)
                 }
             }
             val text = when (phase) {
@@ -1120,7 +965,7 @@ class MainActivity : AppCompatActivity() {
      *   that didn't land last time.
      */
     private fun offerRetryIfResumable() {
-        val resume = resumableEtch ?: return
+        val resume = resumableEtchStore.current ?: return
         if (resume.paidTxHash != null) {
             offerReEtchAfterFinalizeFail(resume)
         } else {
@@ -1181,7 +1026,7 @@ class MainActivity : AppCompatActivity() {
         }
         // Drop the broken state — about to start a fresh etch that
         // doesn't depend on it.
-        setResumableEtch(null)
+        resumableEtchStore.set(null)
         binding.contentInput.setText(state.content)
         binding.titleInput.setText(state.title)
         binding.privateSwitch.isChecked = state.prepared.isPrivate
@@ -1251,7 +1096,7 @@ class MainActivity : AppCompatActivity() {
                         showStatus("Etched privately \u2022 ${formatSize(data.size)} \u2022 ${result.chunksStored} chunks")
                     }
                 }
-                setResumableEtch(null)
+                resumableEtchStore.set(null)
                 binding.contentInput.text.clear()
                 binding.titleInput.text.clear()
             } catch (e: CancellationException) {
@@ -1267,7 +1112,7 @@ class MainActivity : AppCompatActivity() {
                 // an infinite retry loop.
                 val isFfiNotFound = e.message?.contains("not found", ignoreCase = true) == true
                 if (isFfiNotFound) {
-                    setResumableEtch(null)
+                    resumableEtchStore.set(null)
                     showStatus("Previous etch can't be resumed — start a new one", isError = true)
                 } else {
                     showStatus("Retry failed: ${e.shortMessage()}", isError = true)
