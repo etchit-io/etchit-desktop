@@ -51,6 +51,7 @@ import com.autonomi.antpaste.net.ConnectionManager
 import com.autonomi.antpaste.net.ProgressTail
 import com.autonomi.antpaste.ui.ResultCardView
 import com.autonomi.antpaste.ui.WalletModalHost
+import com.autonomi.antpaste.ui.showEtchHistory
 import com.autonomi.antpaste.ui.showFullScreenTextDialog
 import com.autonomi.antpaste.vault.EtchSigner
 import com.autonomi.antpaste.vault.ResumableEtch
@@ -1324,7 +1325,20 @@ class MainActivity : AppCompatActivity() {
         view.findViewById<View>(R.id.etchHistoryBtn).setOnClickListener {
             hapticTick()
             dialog.dismiss()
-            showEtchHistory()
+            showEtchHistory(
+                activity = this@MainActivity,
+                etchHistory = etchHistory,
+                walletSession = walletSession,
+                chainmarkController = chainmarkController,
+                lifecycleScope = lifecycleScope,
+                onCopy = ::copyToClipboard,
+                onShowStatus = ::showStatus,
+                onFetchPublic = { addr ->
+                    binding.addressInput.setText(addr)
+                    retrievePaste()
+                },
+                onFetchPrivate = ::retrievePrivateEtch,
+            )
         }
 
         view.findViewById<View>(R.id.privateEtchesBtn).setOnClickListener {
@@ -1365,183 +1379,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialog.show()
-    }
-
-    private fun showEtchHistory() {
-        val dialog = BottomSheetDialog(this, R.style.SheetDialog)
-        val dp = resources.displayMetrics.density
-        val pad = (24 * dp).toInt()
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-            setBackgroundColor(INK)
-        }
-
-        val title = TextView(this).apply {
-            text = "Etch History"
-            setTextColor(BONE)
-            textSize = 20f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            val mb = (16 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = mb }
-        }
-        root.addView(title)
-
-        val entries = etchHistory.load()
-        if (entries.isEmpty()) {
-            root.addView(TextView(this).apply {
-                text = "No etches yet"
-                setTextColor(ASH)
-                textSize = 13f
-            })
-        } else {
-            val dateFormat = java.text.SimpleDateFormat("MMM d, yyyy  HH:mm", java.util.Locale.getDefault())
-            val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-
-            for (entry in entries) {
-                val row = buildHistoryRow(entry, dateFormat, container, dialog)
-                container.addView(row)
-            }
-            root.addView(container)
-
-            val clearBtn = TextView(this).apply {
-                text = "Clear history"
-                setTextColor(STATUS_RED)
-                textSize = 12f
-                val mt = (12 * dp).toInt()
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = mt }
-                isClickable = true
-                isFocusable = true
-                setOnClickListener {
-                    AlertDialog.Builder(this@MainActivity)
-                        .setTitle("Clear etch history?")
-                        .setMessage("This clears the history log only. Private etches are not affected.")
-                        .setPositiveButton("Clear") { _, _ ->
-                            etchHistory.clear()
-                            dialog.dismiss()
-                        }
-                        .setNegativeButton("Cancel", null)
-                        .show()
-                }
-            }
-            root.addView(clearBtn)
-        }
-
-        val scroll = androidx.core.widget.NestedScrollView(this).apply {
-            addView(root)
-        }
-        dialog.setContentView(scroll)
-        dialog.show()
-    }
-
-    private fun buildHistoryRow(
-        entry: EtchHistory.Entry,
-        dateFormat: java.text.SimpleDateFormat,
-        container: LinearLayout,
-        dialog: BottomSheetDialog,
-    ): LinearLayout {
-        val dp = resources.displayMetrics.density
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val p = (8 * dp).toInt()
-            setPadding(p, p, p, p)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = (4 * dp).toInt() }
-            isClickable = true
-            isFocusable = true
-        }
-
-        row.addView(TextView(this).apply {
-            val label = entry.title.ifEmpty { "Untitled" }
-            text = if (entry.isPrivate) "\uD83D\uDD12 $label" else label
-            setTextColor(BONE)
-            textSize = 13f
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        })
-
-        row.addView(TextView(this).apply {
-            text = if (entry.isPrivate) "Private" else {
-                if (entry.address.length > 16) "${entry.address.take(8)}…${entry.address.takeLast(8)}"
-                else entry.address
-            }
-            setTextColor(if (entry.isPrivate) STATUS_GREEN else COPPER)
-            textSize = 11f
-            typeface = android.graphics.Typeface.MONOSPACE
-        })
-
-        row.addView(TextView(this).apply {
-            text = dateFormat.format(java.util.Date(entry.timestampMs))
-            setTextColor(ASH)
-            textSize = 10f
-        })
-
-        row.setOnClickListener {
-            if (!entry.isPrivate) copyToClipboard(entry.address, "Address")
-        }
-
-        row.setOnLongClickListener {
-            val session = walletSession.state.value as? SessionState.Connected
-            val canAddToChainmarks = !entry.isPrivate &&
-                session != null &&
-                chainmarkController.isSetUp(session.address)
-            val canFetch = if (entry.isPrivate) !entry.dataMapId.isNullOrBlank()
-                           else entry.address.length == 64
-
-            val actions = mutableListOf<Pair<String, () -> Unit>>()
-            if (canFetch) {
-                actions += "Fetch" to {
-                    // Close the history sheet so the result card is visible.
-                    dialog.dismiss()
-                    if (entry.isPrivate) {
-                        retrievePrivateEtch(entry.dataMapId!!)
-                    } else {
-                        // Reuse the public-fetch flow (loading state, opHelper,
-                        // resultCard.displayFetched) by feeding the address
-                        // through the input it already reads from.
-                        binding.addressInput.setText(entry.address)
-                        retrievePaste()
-                    }
-                }
-            }
-            if (canAddToChainmarks) {
-                actions += "Add to chainmarks" to {
-                    val s = session!!
-                    lifecycleScope.launch {
-                        try {
-                            // History rows are demonstrably the user's own etches → action = add.
-                            val txHash = chainmarkController.addByAddress(s.chainId, s.address, entry.address, entry.title, WireEntry.ACTION_ADD)
-                            showStatus("Added to chainmarks: ${txHash.take(10)}…")
-                        } catch (e: Exception) {
-                            showStatus("Add to chainmarks failed: ${e.message}", isError = true)
-                        }
-                    }
-                }
-            }
-            actions += "Remove from history" to {
-                etchHistory.remove(entry)
-                container.removeView(row)
-                if (container.childCount == 0) dialog.dismiss()
-            }
-
-            AlertDialog.Builder(this)
-                .setTitle(entry.title.ifEmpty { "Untitled" })
-                .setItems(actions.map { it.first }.toTypedArray()) { _, i -> actions[i].second() }
-                .setNegativeButton("Cancel", null)
-                .show()
-            true
-        }
-
-        return row
     }
 
     // ── Private Etches Screen ─────────────────────────────────────
