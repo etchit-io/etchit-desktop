@@ -50,6 +50,7 @@ import com.autonomi.antpaste.chainmark.WireEntry
 import com.autonomi.antpaste.net.ConnectionManager
 import com.autonomi.antpaste.net.ProgressTail
 import com.autonomi.antpaste.ui.WalletModalHost
+import com.autonomi.antpaste.ui.showFullScreenTextDialog
 import com.autonomi.antpaste.vault.EtchSigner
 import com.autonomi.antpaste.wallet.EvmRpc
 import com.autonomi.antpaste.wallet.SessionState
@@ -465,6 +466,7 @@ class MainActivity : AppCompatActivity() {
         val contentInputGd = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
                 showFullScreenTextDialog(
+                    activity = this@MainActivity,
                     title = "",
                     initialText = binding.contentInput.text.toString(),
                     editable = true,
@@ -472,6 +474,7 @@ class MainActivity : AppCompatActivity() {
                         binding.contentInput.setText(newText)
                         binding.contentInput.setSelection(newText.length)
                     },
+                    onSave = ::launchSaveText,
                 )
                 return true
             }
@@ -493,9 +496,11 @@ class MainActivity : AppCompatActivity() {
         val resultContentGd = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
                 showFullScreenTextDialog(
+                    activity = this@MainActivity,
                     title = binding.resultTitle.text?.toString().orEmpty().ifBlank { "Fetched content" },
                     initialText = binding.resultContent.text.toString(),
                     editable = false,
+                    onSave = ::launchSaveText,
                 )
                 return true
             }
@@ -3300,315 +3305,11 @@ class MainActivity : AppCompatActivity() {
     private fun parseEnvelope(raw: String): Pair<String, String> =
         PasteUtils.parseEnvelope(raw)
 
-    // Plain fullscreen text editor — covers two cases triggered by double-tap.
-    //   editable=true:  edit the etch content in a focused fullscreen editor.
-    //                    onCommit fires with the latest text on dismiss
-    //                    (close button, back, swipe — auto-commit, no Cancel).
-    //   editable=false: read-only fullscreen view of fetched text that was
-    //                    truncated to maxLines in the result card.
-    // Top bar holds an ✕ close button and a "Save" action that uses the SAF
-    // CreateDocument launcher to write the current text out as .txt.
-    private fun showFullScreenTextDialog(
-        title: String,
-        initialText: String,
-        editable: Boolean,
-        onCommit: ((String) -> Unit)? = null,
-    ) {
-        val dp = resources.displayMetrics.density
-        val pad12 = (12 * dp).toInt()
-        val pad16 = (16 * dp).toInt()
-
-        val dialog = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(INK)
-            fitsSystemWindows = true
-        }
-
-        // ── Top bar ── ← back · optional title · char count · Save
-        val toolbar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setBackgroundColor(INK_2)
-            elevation = 4 * dp
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                (56 * dp).toInt(),
-            )
-        }
-        val closeBtn = android.widget.ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_menu_revert)
-            setColorFilter(BONE)
-            background = null
-            setPadding(pad12, pad12, pad12, pad12)
-            contentDescription = "Close"
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.MATCH_PARENT,
-            )
-        }
-        toolbar.addView(closeBtn)
-        if (title.isNotBlank()) {
-            toolbar.addView(TextView(this).apply {
-                text = title
-                setTextColor(BONE)
-                textSize = 15f
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                setPadding(pad12, 0, pad12, 0)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            })
-        } else {
-            toolbar.addView(View(this).apply {
-                layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
-            })
-        }
-        // Live character count — quietly tracks the typed text. Useful when
-        // you're padding out toward a length target or just curious about
-        // how long the etch will be.
-        val charCount = TextView(this).apply {
-            setTextColor(ASH)
-            textSize = 12f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, 0, pad12, 0)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-        }
-        toolbar.addView(charCount)
-        // Syntax-highlighter language picker. Auto-detects from the buffer's
-        // first non-blank line on open — Plain unless the heuristic is
-        // confident. The user can override via the picker.
-        var currentHighlighter: SyntaxHighlighter = SyntaxHighlighters.detectLanguage(initialText)
-        val langBtn = TextView(this).apply {
-            text = "{}"
-            setTextColor(if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) ASH else COPPER_BRIGHT)
-            textSize = 14f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(pad12, pad12, pad12, pad12)
-            isClickable = true
-            isFocusable = true
-            contentDescription = "Syntax highlighting"
-        }
-        toolbar.addView(langBtn)
-        val saveBtn = TextView(this).apply {
-            text = "Save"
-            setTextColor(COPPER_BRIGHT)
-            textSize = 14f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            letterSpacing = 0.04f
-            setPadding(pad16, pad12, pad16, pad12)
-            isClickable = true
-            isFocusable = true
-            contentDescription = "Save as file"
-        }
-        toolbar.addView(saveBtn)
-        root.addView(toolbar)
-
-        // 1dp copper-dim hairline under the toolbar — a single brand line
-        // separating chrome from writing surface.
-        root.addView(View(this).apply {
-            setBackgroundColor(0xFF8a4e1d.toInt()) // copper-dim
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                Math.max(1, (1 * dp).toInt()),
-            )
-        })
-
-        // ── Editor body ── breathable padding, generous line-height,
-        // fine line-number gutter on the left.
-        val editText = LineNumberEditText(this).apply {
-            setText(initialText)
-            setTextColor(BONE)
-            setHintTextColor(ASH)
-            textSize = 15f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setLineSpacing(0f, 1.6f)
-            // Left padding clears the gutter; right/top/bottom keep the
-            // breathable margins.
-            setPadding(
-                gutterWidthPx + (12 * dp).toInt(),
-                (28 * dp).toInt(),
-                (24 * dp).toInt(),
-                (24 * dp).toInt(),
-            )
-            gravity = android.view.Gravity.TOP or android.view.Gravity.START
-            setBackgroundColor(0)
-            isVerticalScrollBarEnabled = true
-            scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
-            overScrollMode = View.OVER_SCROLL_NEVER
-            // No wrapping — editor sizes to its longest line; the host
-            // SmartHorizontalScrollView pans sideways for long lines.
-            setHorizontallyScrolling(true)
-            if (editable) {
-                isFocusable = true
-                isFocusableInTouchMode = true
-                isCursorVisible = true
-                inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                    android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-                    android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                // Open at the start of the text so the user's reading mental
-                // model is "top-to-bottom" — the previous setSelection(end)
-                // forced the editor to scroll to the bottom on every paste.
-                setSelection(0)
-            } else {
-                isFocusable = false
-                isCursorVisible = false
-                inputType = android.text.InputType.TYPE_NULL
-                setTextIsSelectable(true)
-            }
-        }
-        // SmartHorizontalScrollView passes vertical drags straight through to
-        // the EditText (so up/down scroll stays at native speed) and only
-        // intercepts when the gesture is clearly horizontal — gives smooth
-        // sideways pan for long lines without slowing vertical scroll.
-        val editorScroll = SmartHorizontalScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f,
-            )
-            isHorizontalScrollBarEnabled = true
-            isFillViewport = true
-            overScrollMode = View.OVER_SCROLL_NEVER
-            scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
-            isSmoothScrollingEnabled = true
-        }
-        editText.layoutParams = android.widget.FrameLayout.LayoutParams(
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-        )
-        editorScroll.addView(editText)
-        root.addView(editorScroll)
-
-        // Pinch-to-zoom on the editor text — clamped between 10sp and 28sp.
-        // Gutter line numbers track automatically because they're drawn at
-        // the EditText's getLineBaseline(), which scales with textSize.
-        var currentTextSp = 15f
-        val minSp = 10f
-        val maxSp = 28f
-        val scaleDetector = android.view.ScaleGestureDetector(
-            this,
-            object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
-                override fun onScale(detector: android.view.ScaleGestureDetector): Boolean {
-                    val next = (currentTextSp * detector.scaleFactor).coerceIn(minSp, maxSp)
-                    if (next != currentTextSp) {
-                        currentTextSp = next
-                        editText.textSize = currentTextSp
-                    }
-                    return true
-                }
-            },
-        )
-        editText.setOnTouchListener { _, event ->
-            scaleDetector.onTouchEvent(event)
-            // Don't consume — EditText still needs to handle taps, typing, selection.
-            false
-        }
-
-        // Bind char-count + viewport-aware syntax re-highlight to the EditText.
-        fun updateCharCount() {
-            val n = editText.text.length
-            charCount.text = String.format(java.util.Locale.US, "%,d", n)
-        }
-        updateCharCount()
-        // Highlight model is deliberately simple: tokenize + apply spans once
-        // per text-change (debounced) or language-change. Scroll path does
-        // nothing — EditText handles painting natively, so vertical scroll
-        // stays at native speed.
-        //
-        // Trade-off: very large docs (~28K+ chars) can exceed Android's
-        // SpannableStringBuilder perf wall around 5-7K spans, in which case
-        // the tail of the document goes uncoloured. Smooth scroll is worth
-        // more than perfect coverage at the bottom of an enormous paste.
-        fun rehighlight() {
-            val text = editText.text ?: return
-            if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) {
-                SyntaxHighlighters.clear(text)
-                return
-            }
-            currentHighlighter.apply(text)
-        }
-        val rehighlightHandler = android.os.Handler(android.os.Looper.getMainLooper())
-        var rehighlightToken: Runnable? = null
-        fun scheduleRehighlight(delayMs: Long = 180L) {
-            rehighlightToken?.let { rehighlightHandler.removeCallbacks(it) }
-            val r = Runnable { rehighlight() }
-            rehighlightToken = r
-            rehighlightHandler.postDelayed(r, delayMs)
-        }
-        editText.addTextChangedListener(object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) {
-                updateCharCount()
-                scheduleRehighlight()
-            }
-        })
-        // Initial paint — TextWatcher only fires on text *change*, and the
-        // editor is opened with text pre-populated, so apply the auto-detected
-        // highlighter once now. Posted so the layout pass has a chance to
-        // settle before the spans land.
-        editText.post { rehighlight() }
-
-        langBtn.setOnClickListener {
-            val items = SyntaxHighlighters.all.map { it.displayName }.toTypedArray()
-            val currentIdx = SyntaxHighlighters.all.indexOf(currentHighlighter).coerceAtLeast(0)
-            AlertDialog.Builder(this)
-                .setTitle("Syntax highlighting")
-                .setSingleChoiceItems(items, currentIdx) { d, which ->
-                    currentHighlighter = SyntaxHighlighters.all[which]
-                    langBtn.setTextColor(if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) ASH else COPPER_BRIGHT)
-                    rehighlight()
-                    d.dismiss()
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
-
-        dialog.setContentView(root)
-        dialog.window?.apply {
-            setLayout(
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-            )
-            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(INK_2))
-        }
-
-        // All exit paths (close button, back button, swipe) auto-commit when
-        // editable. setOnDismissListener fires for every dismiss flavour, so
-        // we don't need to special-case the close button.
-        dialog.setOnDismissListener {
-            if (editable) onCommit?.invoke(editText.text.toString())
-        }
-        closeBtn.setOnClickListener { dialog.dismiss() }
-        saveBtn.setOnClickListener {
-            pendingTextToSave = editText.text.toString()
-            val baseName = title.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "etchit" }
-            saveTextLauncher.launch("$baseName.txt")
-            dialog.dismiss()
-        }
-
-        dialog.show()
-        if (editable) {
-            editText.requestFocus()
-            val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
-                as android.view.inputmethod.InputMethodManager
-            imm.showSoftInput(editText, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
-        }
-        // requestFocus + IME show both trigger an auto-scroll-to-cursor; if
-        // the cursor lands anywhere past the visible viewport, the EditText
-        // jumps there. Force the editor back to the top *after* both have
-        // settled — the delay outlasts the IME animation on most devices.
-        editText.postDelayed({
-            editText.setSelection(0)
-            editText.scrollTo(0, 0)
-            editorScroll.scrollTo(0, 0)
-        }, 250L)
+    // Bridge from FullScreenTextDialog's Save action to the SAF launcher
+    // registered above. Stash text, kick off the document picker.
+    private fun launchSaveText(suggestedName: String, content: String) {
+        pendingTextToSave = content
+        saveTextLauncher.launch(suggestedName)
     }
 
     private fun showResult(title: String, address: String, content: String) {
