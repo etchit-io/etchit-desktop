@@ -2,6 +2,7 @@ package com.autonomi.antpaste.vault
 
 import android.util.Log
 import com.autonomi.antpaste.BuildConfig
+import com.autonomi.antpaste.util.shortMessage
 import com.autonomi.antpaste.wallet.Erc20
 import com.autonomi.antpaste.wallet.EvmRpc
 import com.autonomi.antpaste.wallet.SessionState
@@ -287,10 +288,6 @@ class EtchSigner(
         data object FinalizingUpload : Progress()
     }
 }
-
-private fun Throwable.shortMessage(): String =
-    message?.lineSequence()?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
-        ?: javaClass.simpleName
 
 // Backstop in case AppKit drops a request without firing onRequestExpired.
 private suspend fun <T> walletCall(label: String, block: suspend () -> T): T {

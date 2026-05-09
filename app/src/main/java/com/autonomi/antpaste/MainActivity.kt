@@ -56,6 +56,7 @@ import com.autonomi.antpaste.ui.WalletModalHost
 import com.autonomi.antpaste.ui.promptRestoreBackup as showRestoreBackupPrompt
 import com.autonomi.antpaste.ui.showEtchHistory
 import com.autonomi.antpaste.ui.showFullScreenTextDialog
+import com.autonomi.antpaste.util.shortMessage
 import com.autonomi.antpaste.vault.BackupPassphraseCache
 import com.autonomi.antpaste.vault.EtchSigner
 import com.autonomi.antpaste.vault.ResumableEtch
@@ -81,15 +82,6 @@ import uniffi.ant_ffi.Client
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.math.RoundingMode
-
-/**
- * First line of a Throwable's message — strips nested stack traces that
- * Reown's SDK stuffs into outer throwables via `stackTraceToString()`.
- * Keeps status banners readable instead of painting a wall of text.
- */
-private fun Throwable.shortMessage(): String =
-    message?.lineSequence()?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
-        ?: javaClass.simpleName
 
 class MainActivity : AppCompatActivity() {
 

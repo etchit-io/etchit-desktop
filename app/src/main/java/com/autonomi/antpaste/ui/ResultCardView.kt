@@ -13,6 +13,7 @@ import com.autonomi.antpaste.ContentDetector
 import com.autonomi.antpaste.MainActivity
 import com.autonomi.antpaste.PasteUtils
 import com.autonomi.antpaste.databinding.ActivityMainBinding
+import com.autonomi.antpaste.util.shortMessage
 import com.google.android.material.snackbar.Snackbar
 
 // Owns the result card: title + address + content (or image), with the
@@ -141,7 +142,7 @@ class ResultCardView(
                     .setActionTextColor(MainActivity.COPPER)
                     .show()
             } catch (e: Exception) {
-                onShowStatus("Failed to save: ${e.shortMessageInline()}", true)
+                onShowStatus("Failed to save: ${e.shortMessage()}", true)
             }
         }
     }
@@ -168,8 +169,3 @@ class ResultCardView(
     }
 }
 
-// Local copy of the same Throwable.shortMessage extension that lives in
-// MainActivity and EtchSigner — used inline by the binary save error path.
-// TODO: consolidate the three copies into a shared util file in a later cut.
-private fun Throwable.shortMessageInline(): String =
-    (message?.takeIf { it.isNotBlank() } ?: this::class.java.simpleName).take(120)
