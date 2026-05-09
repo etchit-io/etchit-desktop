@@ -49,12 +49,14 @@ import com.autonomi.antpaste.chainmark.ChainmarkKeyManager
 import com.autonomi.antpaste.chainmark.WireEntry
 import com.autonomi.antpaste.net.ConnectionManager
 import com.autonomi.antpaste.net.ProgressTail
+import com.autonomi.antpaste.ui.BackupCreateFlow
 import com.autonomi.antpaste.ui.ChainmarkScreen
 import com.autonomi.antpaste.ui.ResultCardView
 import com.autonomi.antpaste.ui.WalletModalHost
 import com.autonomi.antpaste.ui.promptRestoreBackup as showRestoreBackupPrompt
 import com.autonomi.antpaste.ui.showEtchHistory
 import com.autonomi.antpaste.ui.showFullScreenTextDialog
+import com.autonomi.antpaste.vault.BackupPassphraseCache
 import com.autonomi.antpaste.vault.EtchSigner
 import com.autonomi.antpaste.vault.ResumableEtch
 import com.autonomi.antpaste.vault.ResumableEtchStore
@@ -168,6 +170,8 @@ class MainActivity : AppCompatActivity() {
     private var progressTailJob: Job? = null
     private lateinit var resumableEtchStore: ResumableEtchStore
     private lateinit var chainmarkScreen: ChainmarkScreen
+    private lateinit var backupPassphraseCache: BackupPassphraseCache
+    private lateinit var backupCreateFlow: BackupCreateFlow
 
     /** Reown AppKit session held by the Application instance — one per process. */
     private val walletSession by lazy {
@@ -216,6 +220,16 @@ class MainActivity : AppCompatActivity() {
             etchHistory = etchHistory,
             lifecycleScope = lifecycleScope,
             onShowStatus = ::showStatus,
+        )
+        backupPassphraseCache = BackupPassphraseCache(encryptedPrefs)
+        backupCreateFlow = BackupCreateFlow(
+            activity = this,
+            snackbarAnchor = binding.root,
+            walletSession = walletSession,
+            privateDataStore = privateDataStore,
+            passphraseCache = backupPassphraseCache,
+            onShowStatus = ::showStatus,
+            onEtchBackup = ::etchBackupData,
         )
         opHelper = OperationHelper(this)
 
@@ -1536,7 +1550,7 @@ class MainActivity : AppCompatActivity() {
                 ).apply { topMargin = mt }
                 setOnClickListener {
                     dialog.dismiss()
-                    promptBackupPassword(privateEntries.size)
+                    backupCreateFlow.start(privateEntries.size)
                 }
             }
             root.addView(backupBtn)
@@ -1551,347 +1565,9 @@ class MainActivity : AppCompatActivity() {
 
     // ── Backup / Restore ──────────────────────────────────────────
 
-    // One backup passphrase per wallet, cached in EncryptedSharedPreferences.
-    // The user still has the passphrase on paper / in a password manager —
-    // this is a convenience cache so they don't re-pick a fresh passphrase
-    // for every backup. EncryptedSharedPreferences is Keystore-backed, so
-    // the on-disk bytes are AES-256 encrypted at rest. Wallet-scoped key
-    // means swapping wallets resets the cache.
-    private fun cachedBackupPassphraseKey(wallet: String): String =
-        "backup_passphrase:${wallet.lowercase()}"
-
-    private fun hasCachedBackupPassphrase(wallet: String): Boolean =
-        encryptedPrefs.contains(cachedBackupPassphraseKey(wallet))
-
-    private fun loadCachedBackupPassphrase(wallet: String): String? =
-        encryptedPrefs.getString(cachedBackupPassphraseKey(wallet), null)
-
-    private fun saveCachedBackupPassphrase(wallet: String, passphrase: String) {
-        encryptedPrefs.edit().putString(cachedBackupPassphraseKey(wallet), passphrase).apply()
-    }
-
-    private fun clearCachedBackupPassphrase(wallet: String) {
-        encryptedPrefs.edit().remove(cachedBackupPassphraseKey(wallet)).apply()
-    }
-
     private fun currentWalletAddress(): String? {
         val s = walletSession.state.value
         return if (s is SessionState.Connected) s.address else null
-    }
-
-    private fun promptBackupPassword(entryCount: Int) {
-        val wallet = currentWalletAddress()
-        if (wallet != null && hasCachedBackupPassphrase(wallet)) {
-            promptEtchBackupWithCachedPassphrase(wallet, entryCount)
-            return
-        }
-        val dp = resources.displayMetrics.density
-        val pad = (16 * dp).toInt()
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, 0)
-        }
-
-        layout.addView(TextView(this).apply {
-            text = "Choose a passphrase. Reuse it across devices, or pick a fresh one each time. " +
-                "You'll need it to restore."
-            setTextColor(BONE)
-        })
-
-        val generateBtn = android.widget.Button(this).apply {
-            text = "Generate strong passphrase"
-            val mt = (12 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-        }
-        layout.addView(generateBtn)
-
-        val passwordInput = EditText(this).apply {
-            hint = "Password (or generated passphrase)"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setTextColor(BONE)
-            val mt = (12 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-        }
-        layout.addView(passwordInput)
-
-        val strengthLabel = TextView(this).apply {
-            textSize = 12f
-            val mt = (4 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-        }
-        layout.addView(strengthLabel)
-        passwordInput.addTextChangedListener { applyStrength(strengthLabel, it?.toString().orEmpty()) }
-
-        val confirmInput = EditText(this).apply {
-            hint = "Confirm password"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setTextColor(BONE)
-            val mt = (8 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-        }
-        layout.addView(confirmInput)
-
-        // Reveal panel — only added once a passphrase is generated.
-        val revealLabel = TextView(this).apply {
-            text = ""
-            setTextColor(COPPER_BRIGHT)
-            textSize = 12f
-            val mt = (12 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-            visibility = View.GONE
-        }
-        val revealText = TextView(this).apply {
-            text = ""
-            setTextColor(BONE)
-            textSize = 14f
-            typeface = android.graphics.Typeface.MONOSPACE
-            val padIn = (10 * dp).toInt()
-            setPadding(padIn, padIn, padIn, padIn)
-            setBackgroundColor(0xFF0A0A0A.toInt())
-            val mt = (6 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-            visibility = View.GONE
-        }
-        val revealHint = TextView(this).apply {
-            text = "Write this down — there is no recovery if lost."
-            setTextColor(ASH)
-            textSize = 11f
-            val mt = (4 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-            visibility = View.GONE
-        }
-        layout.addView(revealLabel)
-        layout.addView(revealText)
-        layout.addView(revealHint)
-
-        generateBtn.setOnClickListener {
-            val phrase = BackupPassphrase.generate(6)
-            // Drop the password-mask so the user can read what we generated.
-            passwordInput.inputType = android.text.InputType.TYPE_CLASS_TEXT
-            confirmInput.inputType = android.text.InputType.TYPE_CLASS_TEXT
-            passwordInput.setText(phrase)
-            confirmInput.setText(phrase)
-            revealLabel.text = "Generated passphrase — write it down before you tap Encrypt"
-            revealText.text = phrase
-            revealLabel.visibility = View.VISIBLE
-            revealText.visibility = View.VISIBLE
-            revealHint.visibility = View.VISIBLE
-            // Tap-to-copy on the displayed phrase.
-            revealText.setOnClickListener {
-                val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("etchit backup passphrase", phrase))
-                Snackbar.make(binding.root, "Passphrase copied", Snackbar.LENGTH_SHORT).show()
-            }
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Backup private etches")
-            .setView(layout)
-            .setPositiveButton("Encrypt") { _, _ ->
-                val pw = passwordInput.text.toString()
-                val confirm = confirmInput.text.toString()
-                if (pw.length < MIN_BACKUP_PASSWORD_LEN) {
-                    showStatus("Password must be at least $MIN_BACKUP_PASSWORD_LEN characters", isError = true)
-                    return@setPositiveButton
-                }
-                if (pw != confirm) {
-                    showStatus("Passwords don't match", isError = true)
-                    return@setPositiveButton
-                }
-                confirmAndEtchBackup(pw, entryCount)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun applyStrength(label: TextView, pw: String) {
-        if (pw.isEmpty()) { label.text = ""; return }
-        val classes = listOf(
-            pw.any { it.isLowerCase() },
-            pw.any { it.isUpperCase() },
-            pw.any { it.isDigit() },
-            pw.any { !it.isLetterOrDigit() },
-        ).count { it }
-        val (text, color) = when {
-            pw.length < MIN_BACKUP_PASSWORD_LEN ->
-                "Weak — use at least $MIN_BACKUP_PASSWORD_LEN characters" to STATUS_RED
-            pw.length >= 12 || classes >= 3 -> "Strong" to STATUS_GREEN
-            else -> "OK — stronger with mixed character types" to COPPER_BRIGHT
-        }
-        label.text = text
-        label.setTextColor(color)
-    }
-
-    private fun confirmAndEtchBackup(password: String, entryCount: Int) {
-        val plaintext = privateDataStore.exportAll()
-        val encrypted = BackupCrypto.encrypt(plaintext, password)
-        val sizeStr = PasteUtils.formatSize(encrypted.size)
-
-        AlertDialog.Builder(this)
-            .setTitle("Backup ready")
-            .setMessage(
-                "$sizeStr encrypted \u2022 $entryCount private etch${if (entryCount > 1) "es" else ""}\n\n" +
-                "Etch this backup to the network? It will cost a small amount of ANT. " +
-                "Anyone can fetch it but only your password can decrypt it."
-            )
-            .setPositiveButton("Etch backup") { _, _ ->
-                etchBackupData(encrypted, password)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    // Pre-flight dialog when the wallet already has a cached backup passphrase.
-    // Skips the password entry form and goes straight to encrypt + etch using
-    // the cached value. Inline links offer "show" and "use a different one"
-    // for the rare cases where the user wants to verify or rotate.
-    private fun promptEtchBackupWithCachedPassphrase(wallet: String, entryCount: Int) {
-        val cached = loadCachedBackupPassphrase(wallet)
-        if (cached == null) {
-            // Cache lookup failed \u2014 fall back to normal flow.
-            clearCachedBackupPassphrase(wallet)
-            promptBackupPassword(entryCount)
-            return
-        }
-        val dp = resources.displayMetrics.density
-        val pad = (16 * dp).toInt()
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, 0)
-        }
-        layout.addView(TextView(this).apply {
-            text = "Recovery passphrase set for this wallet. New backup will encrypt with the same passphrase you wrote down \u2014 no entry needed.\n\n" +
-                "$entryCount private etch${if (entryCount > 1) "es" else ""} will be encrypted and etched to the network."
-            setTextColor(BONE)
-        })
-        val linksRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            val mt = (16 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-        }
-        val showLink = TextView(this).apply {
-            text = "Show passphrase"
-            setTextColor(COPPER_BRIGHT)
-            textSize = 13f
-            paint.isUnderlineText = true
-            val mr = (24 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { rightMargin = mr }
-        }
-        val differentLink = TextView(this).apply {
-            text = "Use a different one"
-            setTextColor(COPPER_BRIGHT)
-            textSize = 13f
-            paint.isUnderlineText = true
-        }
-        linksRow.addView(showLink)
-        linksRow.addView(differentLink)
-        layout.addView(linksRow)
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Back up private etches")
-            .setView(layout)
-            .setPositiveButton("Etch backup") { _, _ ->
-                confirmAndEtchBackup(cached, entryCount)
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-
-        showLink.setOnClickListener {
-            dialog.dismiss()
-            showCachedPassphraseDialog(cached) {
-                promptEtchBackupWithCachedPassphrase(wallet, entryCount)
-            }
-        }
-        differentLink.setOnClickListener {
-            dialog.dismiss()
-            promptUseDifferentPassphrase(wallet, entryCount)
-        }
-        dialog.show()
-    }
-
-    private fun promptUseDifferentPassphrase(wallet: String, entryCount: Int) {
-        AlertDialog.Builder(this)
-            .setTitle("Use a different passphrase?")
-            .setMessage(
-                "Your current cached passphrase will be removed from this device. " +
-                "Existing backups encrypted with the old passphrase still decrypt with it (you'd need to remember both for those), " +
-                "and your next new backup will use whatever passphrase you pick now."
-            )
-            .setPositiveButton("Use a different one") { _, _ ->
-                clearCachedBackupPassphrase(wallet)
-                promptBackupPassword(entryCount)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showCachedPassphraseDialog(passphrase: String, onDismiss: () -> Unit) {
-        val dp = resources.displayMetrics.density
-        val pad = (16 * dp).toInt()
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, 0)
-        }
-        layout.addView(TextView(this).apply {
-            text = "Your recovery passphrase. Tap to copy. Anyone with this can decrypt your backup blobs."
-            setTextColor(BONE)
-            textSize = 13f
-        })
-        val phraseView = TextView(this).apply {
-            text = passphrase
-            setTextColor(BONE)
-            typeface = android.graphics.Typeface.MONOSPACE
-            textSize = 14f
-            val padIn = (10 * dp).toInt()
-            setPadding(padIn, padIn, padIn, padIn)
-            setBackgroundColor(0xFF0A0A0A.toInt())
-            val mt = (16 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-        }
-        phraseView.setOnClickListener {
-            val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            cm.setPrimaryClip(android.content.ClipData.newPlainText("etchit backup passphrase", passphrase))
-            Snackbar.make(binding.root, "Passphrase copied", Snackbar.LENGTH_SHORT).show()
-        }
-        layout.addView(phraseView)
-        AlertDialog.Builder(this)
-            .setTitle("Recovery passphrase")
-            .setView(layout)
-            .setPositiveButton("Done") { _, _ -> onDismiss() }
-            .setOnCancelListener { onDismiss() }
-            .show()
     }
 
     private fun etchBackupData(data: ByteArray, passphrase: String) {
@@ -1969,7 +1645,7 @@ class MainActivity : AppCompatActivity() {
                         // Cache the passphrase under this wallet so future backups
                         // reuse it silently. Idempotent — overwrites with the same
                         // value if the user is re-using their cached passphrase.
-                        currentWalletAddress()?.let { saveCachedBackupPassphrase(it, passphrase) }
+                        currentWalletAddress()?.let { backupPassphraseCache.save(it, passphrase) }
                     }
                     is EtchSigner.EtchResult.Private -> {
                         // Shouldn't happen — backups are always public
@@ -2004,7 +1680,7 @@ class MainActivity : AppCompatActivity() {
             privateDataStore = privateDataStore,
             onShowStatus = ::showStatus,
             currentWalletAddress = ::currentWalletAddress,
-            savePassphrase = ::saveCachedBackupPassphrase,
+            savePassphrase = backupPassphraseCache::save,
         )
     }
 
