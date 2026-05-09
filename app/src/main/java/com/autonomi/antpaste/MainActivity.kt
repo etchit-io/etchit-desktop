@@ -49,8 +49,17 @@ import com.autonomi.antpaste.chainmark.ChainmarkKeyManager
 import com.autonomi.antpaste.chainmark.WireEntry
 import com.autonomi.antpaste.net.ConnectionManager
 import com.autonomi.antpaste.net.ProgressTail
+import com.autonomi.antpaste.ui.BackupCreateFlow
+import com.autonomi.antpaste.ui.ChainmarkScreen
+import com.autonomi.antpaste.ui.ResultCardView
 import com.autonomi.antpaste.ui.WalletModalHost
+import com.autonomi.antpaste.ui.promptRestoreBackup as showRestoreBackupPrompt
+import com.autonomi.antpaste.ui.showEtchHistory
+import com.autonomi.antpaste.ui.showFullScreenTextDialog
+import com.autonomi.antpaste.vault.BackupPassphraseCache
 import com.autonomi.antpaste.vault.EtchSigner
+import com.autonomi.antpaste.vault.ResumableEtch
+import com.autonomi.antpaste.vault.ResumableEtchStore
 import com.autonomi.antpaste.wallet.EvmRpc
 import com.autonomi.antpaste.wallet.SessionState
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -108,15 +117,8 @@ class MainActivity : AppCompatActivity() {
             "application/x-yaml",
         )
 
-        /** Encrypted-prefs key for the persisted [ResumableEtch] across
-         *  process death. Bumping the suffix forces older payloads to be
-         *  discarded if the schema ever changes incompatibly. */
-        private const val PENDING_ETCH_KEY = "pending_etch_state_v1"
-        /** Discard persisted pending etches older than this. Quotes are
-         *  technically valid for 7-30 days at the node level, but the
-         *  user almost certainly didn't mean to resume a day-old etch —
-         *  the chunks may also have been replicated elsewhere by then. */
-        private const val PENDING_ETCH_MAX_AGE_MS = 24L * 60L * 60L * 1000L
+        // ResumableEtch persistence (encrypted-prefs key, max-age) lives in
+        // ResumableEtchStore now. Constants below are app-level UI concerns.
 
         /** Warmup peer-count target — same as the prior first-touch gate. */
         private const val WARMUP_TARGET_PEERS = 10
@@ -132,6 +134,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var prefs: SharedPreferences
     private lateinit var encryptedPrefs: SharedPreferences
+    private lateinit var resultCard: ResultCardView
 
     private val attachTextFileLauncher: ActivityResultLauncher<Array<String>> =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -165,169 +168,29 @@ class MainActivity : AppCompatActivity() {
     private lateinit var opHelper: OperationHelper
     private var networkInfoJob: Job? = null
     private var progressTailJob: Job? = null
-
-    /**
-     * Held between a failed wallet attempt and a retry. Captures the
-     * FFI-side PreparedEtch (uploadId + quotes) and the user's chosen
-     * session budget so retrying skips the minutes-long quote collection
-     * and the cost dialog. Cleared on success or when the user starts a
-     * fresh etch.
-     */
-    private data class ResumableEtch(
-        val prepared: EtchSigner.PreparedEtch,
-        val approveBudget: BigInteger,
-        val title: String,
-        val content: String,
-        val isBackup: Boolean = false,
-        /** Hash of a prior successful `payForQuotes` for this prepared
-         *  upload, captured the moment the receipt confirmed. When set,
-         *  retryResumableEtch passes it to `signAndFinalize` to skip the
-         *  wallet flow and avoid double-charging. */
-        val paidTxHash: String? = null,
-    )
-    private var resumableEtch: ResumableEtch? = null
-
-    /**
-     * Single-source-of-truth setter for [resumableEtch]. Updates the
-     * in-memory field AND persists to encrypted prefs so a process death
-     * (or Activity destruction) between payment-confirmed and finalize-
-     * complete preserves the `paidTxHash` — without it the retry path
-     * can't skip the wallet flow on resume and the user pays twice.
-     *
-     * [durable] forces a synchronous `commit()` for write paths where the
-     * value MUST be on disk before the next operation (specifically the
-     * paidTxHash capture: if the OS kills the process between the async
-     * apply() and the disk flush, the resume path won't see the hash and
-     * will re-pay). For non-critical updates `apply()` is fine.
-     */
-    private fun setResumableEtch(value: ResumableEtch?, durable: Boolean = false) {
-        resumableEtch = value
-        try {
-            val editor = encryptedPrefs.edit()
-            if (value == null) {
-                editor.remove(PENDING_ETCH_KEY)
-            } else {
-                editor.putString(PENDING_ETCH_KEY, value.toJsonString())
-            }
-            if (durable) editor.commit() else editor.apply()
-        } catch (e: Exception) {
-            // Don't fail the etch flow if persistence breaks — the
-            // in-memory field is still correct, only resume-after-death
-            // is at risk.
-            Log.e("ant-paste", "setResumableEtch persist failed: ${e.message}", e)
-        }
-    }
-
-    /**
-     * Read any persisted pending etch from a prior process. Returns null
-     * if none, malformed, or older than [PENDING_ETCH_MAX_AGE_MS].
-     */
-    private fun loadPendingEtch(): ResumableEtch? {
-        val json = try {
-            encryptedPrefs.getString(PENDING_ETCH_KEY, null)
-        } catch (e: Exception) {
-            Log.w("ant-paste", "loadPendingEtch: encryptedPrefs read failed: ${e.message}")
-            return null
-        } ?: return null
-
-        val parsed = parseResumableEtchJson(json) ?: run {
-            Log.w("ant-paste", "loadPendingEtch: parse failed, clearing")
-            encryptedPrefs.edit().remove(PENDING_ETCH_KEY).apply()
-            return null
-        }
-
-        val ageMs = System.currentTimeMillis() - parsed.prepared.createdAtMs
-        if (ageMs > PENDING_ETCH_MAX_AGE_MS) {
-            Log.i("ant-paste", "loadPendingEtch: discarding stale entry (age=${ageMs / 1000 / 60}m)")
-            encryptedPrefs.edit().remove(PENDING_ETCH_KEY).apply()
-            return null
-        }
-
-        return parsed
-    }
+    private lateinit var resumableEtchStore: ResumableEtchStore
+    private lateinit var chainmarkScreen: ChainmarkScreen
+    private lateinit var backupPassphraseCache: BackupPassphraseCache
+    private lateinit var backupCreateFlow: BackupCreateFlow
 
     /** Reown AppKit session held by the Application instance — one per process. */
     private val walletSession by lazy {
         (application as EtchitApplication).walletSession
     }
 
-    // ── ResumableEtch JSON persistence ────────────────────────────
-
-    private fun ResumableEtch.toJsonString(): String {
-        val paymentsArr = JSONArray()
-        prepared.payments.forEach { p ->
-            paymentsArr.put(JSONObject().apply {
-                put("quote_hash", p.quoteHash)
-                put("rewards_address", p.rewardsAddress)
-                put("amount", p.amount)
-            })
-        }
-        val preparedJson = JSONObject().apply {
-            put("uploadId", prepared.uploadId)
-            put("totalAmountStr", prepared.totalAmountStr)
-            put("publicAddress", prepared.publicAddress ?: JSONObject.NULL)
-            put("privateDataMap", prepared.privateDataMap ?: JSONObject.NULL)
-            put("isPrivate", prepared.isPrivate)
-            put("dataSize", prepared.dataSize)
-            put("createdAtMs", prepared.createdAtMs)
-            put("payments", paymentsArr)
-        }
-        return JSONObject().apply {
-            put("schema", 1)
-            put("title", title)
-            put("content", content)
-            put("approveBudget", approveBudget.toString())
-            put("isBackup", isBackup)
-            put("paidTxHash", paidTxHash ?: JSONObject.NULL)
-            put("prepared", preparedJson)
-        }.toString()
-    }
-
-    private fun parseResumableEtchJson(json: String): ResumableEtch? = try {
-        val obj = JSONObject(json)
-        val preparedObj = obj.getJSONObject("prepared")
-        val paymentsArr = preparedObj.getJSONArray("payments")
-        val payments = (0 until paymentsArr.length()).map { i ->
-            val p = paymentsArr.getJSONObject(i)
-            uniffi.ant_ffi.PaymentEntry(
-                quoteHash = p.getString("quote_hash"),
-                rewardsAddress = p.getString("rewards_address"),
-                amount = p.getString("amount"),
-            )
-        }
-        val totalAmountStr = preparedObj.getString("totalAmountStr")
-        val prepared = EtchSigner.PreparedEtch(
-            uploadId = preparedObj.getString("uploadId"),
-            payments = payments,
-            totalAmountStr = totalAmountStr,
-            totalAtto = BigInteger(totalAmountStr),
-            publicAddress = preparedObj.optStringOrNull("publicAddress"),
-            privateDataMap = preparedObj.optStringOrNull("privateDataMap"),
-            isPrivate = preparedObj.getBoolean("isPrivate"),
-            dataSize = preparedObj.getInt("dataSize"),
-            createdAtMs = preparedObj.getLong("createdAtMs"),
-        )
-        ResumableEtch(
-            prepared = prepared,
-            approveBudget = BigInteger(obj.getString("approveBudget")),
-            title = obj.getString("title"),
-            content = obj.getString("content"),
-            isBackup = obj.optBoolean("isBackup", false),
-            paidTxHash = obj.optStringOrNull("paidTxHash"),
-        )
-    } catch (e: Exception) {
-        Log.w("ant-paste", "parseResumableEtchJson failed: ${e.message}", e)
-        null
-    }
-
-    private fun JSONObject.optStringOrNull(key: String): String? =
-        if (isNull(key) || !has(key)) null else optString(key).takeIf { it.isNotEmpty() }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         prefs = getSharedPreferences("ant_paste", Context.MODE_PRIVATE)
+        resultCard = ResultCardView(
+            activity = this,
+            binding = binding,
+            onShowStatus = ::showStatus,
+            onCopy = ::copyToClipboard,
+            onHaptic = ::hapticSuccess,
+            onBackupDetected = ::promptRestoreBackup,
+        )
 
         val masterKey = MasterKey.Builder(this)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -340,6 +203,7 @@ class MainActivity : AppCompatActivity() {
 
         etchHistory = EtchHistory(prefs)
         privateDataStore = PrivateDataStore(encryptedPrefs)
+        resumableEtchStore = ResumableEtchStore(encryptedPrefs)
         val walletSignerForChainmark = (application as EtchitApplication).walletSigner
         chainmarkController = ChainmarkController(
             keyManager = ChainmarkKeyManager(encryptedPrefs, walletSignerForChainmark),
@@ -349,19 +213,37 @@ class MainActivity : AppCompatActivity() {
             ),
             walletSigner = walletSignerForChainmark,
         )
+        chainmarkScreen = ChainmarkScreen(
+            activity = this,
+            walletSession = walletSession,
+            chainmarkController = chainmarkController,
+            etchHistory = etchHistory,
+            lifecycleScope = lifecycleScope,
+            onShowStatus = ::showStatus,
+        )
+        backupPassphraseCache = BackupPassphraseCache(encryptedPrefs)
+        backupCreateFlow = BackupCreateFlow(
+            activity = this,
+            snackbarAnchor = binding.root,
+            walletSession = walletSession,
+            privateDataStore = privateDataStore,
+            passphraseCache = backupPassphraseCache,
+            onShowStatus = ::showStatus,
+            onEtchBackup = ::etchBackupData,
+        )
         opHelper = OperationHelper(this)
 
         // Restore any persisted pending etch. The resume Snackbar fires
         // later, in connectToNetwork's success path, once nativeClient
         // is ready.
-        loadPendingEtch()?.let { restored ->
+        resumableEtchStore.loadPersisted()?.let { restored ->
             Log.i(
                 "ant-paste",
                 "MainActivity: restored pending etch — uploadId=${restored.prepared.uploadId} " +
                     "paidTxHash=${restored.paidTxHash ?: "<none>"} " +
                     "ageSec=${(System.currentTimeMillis() - restored.prepared.createdAtMs) / 1000}",
             )
-            resumableEtch = restored
+            resumableEtchStore.restore(restored)
         }
 
         runLegacyCleanup()
@@ -465,6 +347,7 @@ class MainActivity : AppCompatActivity() {
         val contentInputGd = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
                 showFullScreenTextDialog(
+                    activity = this@MainActivity,
                     title = "",
                     initialText = binding.contentInput.text.toString(),
                     editable = true,
@@ -472,6 +355,7 @@ class MainActivity : AppCompatActivity() {
                         binding.contentInput.setText(newText)
                         binding.contentInput.setSelection(newText.length)
                     },
+                    onSave = ::launchSaveText,
                 )
                 return true
             }
@@ -493,9 +377,11 @@ class MainActivity : AppCompatActivity() {
         val resultContentGd = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
                 showFullScreenTextDialog(
+                    activity = this@MainActivity,
                     title = binding.resultTitle.text?.toString().orEmpty().ifBlank { "Fetched content" },
                     initialText = binding.resultContent.text.toString(),
                     editable = false,
+                    onSave = ::launchSaveText,
                 )
                 return true
             }
@@ -618,28 +504,6 @@ class MainActivity : AppCompatActivity() {
                 .start()
         }
     }
-
-    private fun animateResultCard() {
-        val card = binding.resultCard
-        card.alpha = 0f
-        card.translationY = 60f
-        card.scaleX = 0.95f
-        card.scaleY = 0.95f
-        card.visibility = View.VISIBLE
-
-        val anim = AnimatorSet()
-        anim.playTogether(
-            ObjectAnimator.ofFloat(card, "alpha", 0f, 1f).setDuration(400),
-            ObjectAnimator.ofFloat(card, "translationY", 60f, 0f).setDuration(500),
-            ObjectAnimator.ofFloat(card, "scaleX", 0.95f, 1f).setDuration(500),
-            ObjectAnimator.ofFloat(card, "scaleY", 0.95f, 1f).setDuration(500),
-        )
-        anim.interpolator = OvershootInterpolator(0.8f)
-        anim.start()
-
-        hapticSuccess()
-    }
-
     private fun animateButtonPress(view: View) {
         val scaleDown = AnimatorSet().apply {
             playTogether(
@@ -767,7 +631,7 @@ class MainActivity : AppCompatActivity() {
 
                 // If a prior process left a pending etch persisted, offer
                 // to finish it now that we have a live nativeClient.
-                resumableEtch?.let { offerResumeFromPersisted(it) }
+                resumableEtchStore.current?.let { offerResumeFromPersisted(it) }
             } catch (e: TimeoutCancellationException) {
                 Log.e("ant-paste", "Connection timed out after 45s", e)
                 stopStatusPulse()
@@ -959,7 +823,7 @@ class MainActivity : AppCompatActivity() {
 
         // Starting a fresh etch invalidates any previous resumable state —
         // we're about to prepare a new upload with new quotes.
-        setResumableEtch(null)
+        resumableEtchStore.set(null)
 
         storeJob = lifecycleScope.launch {
             opHelper.start("Starting…")
@@ -988,8 +852,8 @@ class MainActivity : AppCompatActivity() {
                                 // of withContext, otherwise a retry would
                                 // approve only one etch worth instead of
                                 // the full session budget.
-                                resumableEtch?.let {
-                                    setResumableEtch(it.copy(approveBudget = budget))
+                                resumableEtchStore.current?.let {
+                                    resumableEtchStore.set(it.copy(approveBudget = budget))
                                 }
                             }
                         },
@@ -999,7 +863,7 @@ class MainActivity : AppCompatActivity() {
                             // valid even if the wallet fails before the
                             // user picks a budget; updated above once they
                             // confirm the cost prompt.
-                            setResumableEtch(ResumableEtch(
+                            resumableEtchStore.set(ResumableEtch(
                                 prepared = prepared,
                                 approveBudget = prepared.totalAtto,
                                 title = title,
@@ -1010,7 +874,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 if (result == null) {
-                    setResumableEtch(null)
+                    resumableEtchStore.set(null)
                     showStatus("Cancelled")
                     return@launch
                 }
@@ -1018,14 +882,14 @@ class MainActivity : AppCompatActivity() {
                 val displayTitle = title.ifEmpty { "Untitled" }
                 when (result) {
                     is EtchSigner.EtchResult.Public -> {
-                        showResult(displayTitle, result.address, content)
+                        resultCard.show(displayTitle, result.address, content)
                         showStatus("Etched permanently \u2022 ${formatSize(data.size)} \u2022 ${result.chunksStored} chunks")
                         etchHistory.add(result.address, displayTitle)
                     }
                     is EtchSigner.EtchResult.Private -> {
                         val dmId = privateDataStore.save(displayTitle, result.dataMapHex)
                         etchHistory.addPrivate(displayTitle, dmId)
-                        showResult(displayTitle, "Private \u2022 stored on device", content)
+                        resultCard.show(displayTitle, "Private \u2022 stored on device", content)
                         binding.resultAddress.setTextColor(STATUS_GREEN)
                         binding.copyAddressBtn.visibility = View.GONE
                         binding.shareButton.visibility = View.GONE
@@ -1033,7 +897,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                setResumableEtch(null)
+                resumableEtchStore.set(null)
                 binding.contentInput.text.clear()
                 binding.titleInput.text.clear()
 
@@ -1077,8 +941,8 @@ class MainActivity : AppCompatActivity() {
             // write to a kill-during-async-flush is the exact failure
             // mode the persistence is meant to prevent.
             if (phase is EtchSigner.Progress.PaidAwaitingFinalize) {
-                resumableEtch?.let {
-                    setResumableEtch(it.copy(paidTxHash = phase.txHash), durable = true)
+                resumableEtchStore.current?.let {
+                    resumableEtchStore.set(it.copy(paidTxHash = phase.txHash), durable = true)
                 }
             }
             val text = when (phase) {
@@ -1127,7 +991,7 @@ class MainActivity : AppCompatActivity() {
      *   that didn't land last time.
      */
     private fun offerRetryIfResumable() {
-        val resume = resumableEtch ?: return
+        val resume = resumableEtchStore.current ?: return
         if (resume.paidTxHash != null) {
             offerReEtchAfterFinalizeFail(resume)
         } else {
@@ -1188,7 +1052,7 @@ class MainActivity : AppCompatActivity() {
         }
         // Drop the broken state — about to start a fresh etch that
         // doesn't depend on it.
-        setResumableEtch(null)
+        resumableEtchStore.set(null)
         binding.contentInput.setText(state.content)
         binding.titleInput.setText(state.title)
         binding.privateSwitch.isChecked = state.prepared.isPrivate
@@ -1244,21 +1108,21 @@ class MainActivity : AppCompatActivity() {
                 }
                 when (result) {
                     is EtchSigner.EtchResult.Public -> {
-                        showResult(displayTitle, result.address, content)
+                        resultCard.show(displayTitle, result.address, content)
                         showStatus("Etched permanently \u2022 ${formatSize(data.size)} \u2022 ${result.chunksStored} chunks")
                         etchHistory.add(result.address, displayTitle)
                     }
                     is EtchSigner.EtchResult.Private -> {
                         val dmId = privateDataStore.save(displayTitle, result.dataMapHex)
                         etchHistory.addPrivate(displayTitle, dmId)
-                        showResult(displayTitle, "Private \u2022 stored on device", content)
+                        resultCard.show(displayTitle, "Private \u2022 stored on device", content)
                         binding.resultAddress.setTextColor(STATUS_GREEN)
                         binding.copyAddressBtn.visibility = View.GONE
                         binding.shareButton.visibility = View.GONE
                         showStatus("Etched privately \u2022 ${formatSize(data.size)} \u2022 ${result.chunksStored} chunks")
                     }
                 }
-                setResumableEtch(null)
+                resumableEtchStore.set(null)
                 binding.contentInput.text.clear()
                 binding.titleInput.text.clear()
             } catch (e: CancellationException) {
@@ -1274,7 +1138,7 @@ class MainActivity : AppCompatActivity() {
                 // an infinite retry loop.
                 val isFfiNotFound = e.message?.contains("not found", ignoreCase = true) == true
                 if (isFfiNotFound) {
-                    setResumableEtch(null)
+                    resumableEtchStore.set(null)
                     showStatus("Previous etch can't be resumed — start a new one", isError = true)
                 } else {
                     showStatus("Retry failed: ${e.shortMessage()}", isError = true)
@@ -1407,7 +1271,7 @@ class MainActivity : AppCompatActivity() {
                     nativeClient!!.dataGetPublic(address)
                 }
 
-                displayFetchedData(data, address)
+                resultCard.displayFetched(data, address)
 
             } catch (e: CancellationException) {
                 showStatus("Cancelled")
@@ -1486,7 +1350,20 @@ class MainActivity : AppCompatActivity() {
         view.findViewById<View>(R.id.etchHistoryBtn).setOnClickListener {
             hapticTick()
             dialog.dismiss()
-            showEtchHistory()
+            showEtchHistory(
+                activity = this@MainActivity,
+                etchHistory = etchHistory,
+                walletSession = walletSession,
+                chainmarkController = chainmarkController,
+                lifecycleScope = lifecycleScope,
+                onCopy = ::copyToClipboard,
+                onShowStatus = ::showStatus,
+                onFetchPublic = { addr ->
+                    binding.addressInput.setText(addr)
+                    retrievePaste()
+                },
+                onFetchPrivate = ::retrievePrivateEtch,
+            )
         }
 
         view.findViewById<View>(R.id.privateEtchesBtn).setOnClickListener {
@@ -1498,7 +1375,7 @@ class MainActivity : AppCompatActivity() {
         view.findViewById<View>(R.id.chainmarkBtn).setOnClickListener {
             hapticTick()
             dialog.dismiss()
-            showChainmarkScreen()
+            chainmarkScreen.show()
         }
 
         view.findViewById<View>(R.id.viewTermsBtn).setOnClickListener {
@@ -1527,183 +1404,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialog.show()
-    }
-
-    private fun showEtchHistory() {
-        val dialog = BottomSheetDialog(this, R.style.SheetDialog)
-        val dp = resources.displayMetrics.density
-        val pad = (24 * dp).toInt()
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-            setBackgroundColor(INK)
-        }
-
-        val title = TextView(this).apply {
-            text = "Etch History"
-            setTextColor(BONE)
-            textSize = 20f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            val mb = (16 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = mb }
-        }
-        root.addView(title)
-
-        val entries = etchHistory.load()
-        if (entries.isEmpty()) {
-            root.addView(TextView(this).apply {
-                text = "No etches yet"
-                setTextColor(ASH)
-                textSize = 13f
-            })
-        } else {
-            val dateFormat = java.text.SimpleDateFormat("MMM d, yyyy  HH:mm", java.util.Locale.getDefault())
-            val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-
-            for (entry in entries) {
-                val row = buildHistoryRow(entry, dateFormat, container, dialog)
-                container.addView(row)
-            }
-            root.addView(container)
-
-            val clearBtn = TextView(this).apply {
-                text = "Clear history"
-                setTextColor(STATUS_RED)
-                textSize = 12f
-                val mt = (12 * dp).toInt()
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = mt }
-                isClickable = true
-                isFocusable = true
-                setOnClickListener {
-                    AlertDialog.Builder(this@MainActivity)
-                        .setTitle("Clear etch history?")
-                        .setMessage("This clears the history log only. Private etches are not affected.")
-                        .setPositiveButton("Clear") { _, _ ->
-                            etchHistory.clear()
-                            dialog.dismiss()
-                        }
-                        .setNegativeButton("Cancel", null)
-                        .show()
-                }
-            }
-            root.addView(clearBtn)
-        }
-
-        val scroll = androidx.core.widget.NestedScrollView(this).apply {
-            addView(root)
-        }
-        dialog.setContentView(scroll)
-        dialog.show()
-    }
-
-    private fun buildHistoryRow(
-        entry: EtchHistory.Entry,
-        dateFormat: java.text.SimpleDateFormat,
-        container: LinearLayout,
-        dialog: BottomSheetDialog,
-    ): LinearLayout {
-        val dp = resources.displayMetrics.density
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val p = (8 * dp).toInt()
-            setPadding(p, p, p, p)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = (4 * dp).toInt() }
-            isClickable = true
-            isFocusable = true
-        }
-
-        row.addView(TextView(this).apply {
-            val label = entry.title.ifEmpty { "Untitled" }
-            text = if (entry.isPrivate) "\uD83D\uDD12 $label" else label
-            setTextColor(BONE)
-            textSize = 13f
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        })
-
-        row.addView(TextView(this).apply {
-            text = if (entry.isPrivate) "Private" else {
-                if (entry.address.length > 16) "${entry.address.take(8)}…${entry.address.takeLast(8)}"
-                else entry.address
-            }
-            setTextColor(if (entry.isPrivate) STATUS_GREEN else COPPER)
-            textSize = 11f
-            typeface = android.graphics.Typeface.MONOSPACE
-        })
-
-        row.addView(TextView(this).apply {
-            text = dateFormat.format(java.util.Date(entry.timestampMs))
-            setTextColor(ASH)
-            textSize = 10f
-        })
-
-        row.setOnClickListener {
-            if (!entry.isPrivate) copyToClipboard(entry.address, "Address")
-        }
-
-        row.setOnLongClickListener {
-            val session = walletSession.state.value as? SessionState.Connected
-            val canAddToChainmarks = !entry.isPrivate &&
-                session != null &&
-                chainmarkController.isSetUp(session.address)
-            val canFetch = if (entry.isPrivate) !entry.dataMapId.isNullOrBlank()
-                           else entry.address.length == 64
-
-            val actions = mutableListOf<Pair<String, () -> Unit>>()
-            if (canFetch) {
-                actions += "Fetch" to {
-                    // Close the history sheet so the result card is visible.
-                    dialog.dismiss()
-                    if (entry.isPrivate) {
-                        retrievePrivateEtch(entry.dataMapId!!)
-                    } else {
-                        // Reuse the public-fetch flow (loading state, opHelper,
-                        // displayFetchedData) by feeding the address through
-                        // the input it already reads from.
-                        binding.addressInput.setText(entry.address)
-                        retrievePaste()
-                    }
-                }
-            }
-            if (canAddToChainmarks) {
-                actions += "Add to chainmarks" to {
-                    val s = session!!
-                    lifecycleScope.launch {
-                        try {
-                            // History rows are demonstrably the user's own etches → action = add.
-                            val txHash = chainmarkController.addByAddress(s.chainId, s.address, entry.address, entry.title, WireEntry.ACTION_ADD)
-                            showStatus("Added to chainmarks: ${txHash.take(10)}…")
-                        } catch (e: Exception) {
-                            showStatus("Add to chainmarks failed: ${e.message}", isError = true)
-                        }
-                    }
-                }
-            }
-            actions += "Remove from history" to {
-                etchHistory.remove(entry)
-                container.removeView(row)
-                if (container.childCount == 0) dialog.dismiss()
-            }
-
-            AlertDialog.Builder(this)
-                .setTitle(entry.title.ifEmpty { "Untitled" })
-                .setItems(actions.map { it.first }.toTypedArray()) { _, i -> actions[i].second() }
-                .setNegativeButton("Cancel", null)
-                .show()
-            true
-        }
-
-        return row
     }
 
     // ── Private Etches Screen ─────────────────────────────────────
@@ -1850,7 +1550,7 @@ class MainActivity : AppCompatActivity() {
                 ).apply { topMargin = mt }
                 setOnClickListener {
                     dialog.dismiss()
-                    promptBackupPassword(privateEntries.size)
+                    backupCreateFlow.start(privateEntries.size)
                 }
             }
             root.addView(backupBtn)
@@ -1863,942 +1563,11 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    // ── chain/it (chainmarks) ───────────────────────────────────────
-
-    private fun showChainmarkScreen() {
-        val dialog = BottomSheetDialog(this, R.style.SheetDialog)
-        val dp = resources.displayMetrics.density
-        val pad = (24 * dp).toInt()
-
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-            setBackgroundColor(INK)
-        }
-
-        fun heading(text: String, sizeSp: Float = 20f, bottomMarginDp: Int = 4) = TextView(this).apply {
-            this.text = text
-            setTextColor(BONE)
-            textSize = sizeSp
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = (bottomMarginDp * dp).toInt() }
-        }
-
-        fun muted(text: String, bottomMarginDp: Int = 16) = TextView(this).apply {
-            this.text = text
-            setTextColor(ASH)
-            textSize = 12f
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = (bottomMarginDp * dp).toInt() }
-        }
-
-        fun primaryButton(text: String, topMarginDp: Int = 8, onClick: () -> Unit) =
-            com.google.android.material.button.MaterialButton(this).apply {
-                this.text = text
-                textSize = 13f
-                isAllCaps = false
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = (topMarginDp * dp).toInt() }
-                setOnClickListener { onClick() }
-            }
-
-        fun outlinedButton(text: String, topMarginDp: Int = 8, onClick: () -> Unit) =
-            com.google.android.material.button.MaterialButton(
-                this,
-                null,
-                com.google.android.material.R.attr.materialButtonOutlinedStyle,
-            ).apply {
-                this.text = text
-                textSize = 13f
-                isAllCaps = false
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = (topMarginDp * dp).toInt() }
-                setOnClickListener { onClick() }
-            }
-
-        lateinit var render: () -> Unit
-        render = {
-            container.removeAllViews()
-            container.addView(heading("chain/it"))
-            container.addView(muted(
-                "An encrypted on-chain index of your public etches. Off until you set it up. " +
-                "Each sync writes one Arbitrum transaction — your wallet shows the gas estimate before you sign. See README for the full privacy model."
-            ))
-
-            val session = walletSession.state.value
-            when {
-                session !is SessionState.Connected -> {
-                    container.addView(muted("Connect a wallet first to use chain/it.", bottomMarginDp = 0))
-                }
-                !chainmarkController.isSetUp(session.address) -> {
-                    container.addView(muted(
-                        "Setting up requires one signature to derive your chainmark encryption key. " +
-                        "This signature does NOT authorize any transaction.", bottomMarginDp = 8))
-                    container.addView(primaryButton("Set up chain/it") {
-                        lifecycleScope.launch {
-                            try {
-                                chainmarkController.setUp(session.chainId, session.address)
-                                showStatus("chain/it set up.")
-                                render()
-                            } catch (e: Exception) {
-                                showStatus("Setup failed: ${e.message}", isError = true)
-                            }
-                        }
-                    })
-                }
-                else -> {
-                    val wallet = session.address
-                    val chainId = session.chainId
-
-                    val visible = chainmarkController.entriesFor(wallet).values
-                        .filterNot { it.isHidden }
-                        .sortedByDescending { it.ts }
-
-                    if (visible.isEmpty()) {
-                        container.addView(muted(
-                            "No entries loaded. Tap Sync chainmarks to fetch from chain, or Add by address to add one.",
-                            bottomMarginDp = 8))
-                    } else {
-                        container.addView(muted("${visible.size} entr${if (visible.size == 1) "y" else "ies"}", bottomMarginDp = 8))
-                        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                        val df = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault())
-                        for (e in visible) {
-                            list.addView(chainmarkEntryRow(e, df, dialog) { render() })
-                        }
-                        container.addView(list)
-                    }
-
-                    container.addView(primaryButton("Sync chainmarks", topMarginDp = 16) {
-                        lifecycleScope.launch {
-                            try {
-                                showStatus("Syncing chainmarks…")
-                                chainmarkController.restoreFromChain(wallet)
-                                showStatus("Chainmarks synced.")
-                                render()
-                            } catch (e: Exception) {
-                                showStatus("Sync failed: ${e.message}", isError = true)
-                            }
-                        }
-                    })
-
-                    container.addView(outlinedButton("Add by address") {
-                        promptAddByAddress { addr, title ->
-                            lifecycleScope.launch {
-                                try {
-                                    val txHash = chainmarkController.addByAddress(chainId, wallet, addr, title, WireEntry.ACTION_ADD)
-                                    showStatus("Synced: ${txHash.take(10)}…")
-                                    render()
-                                } catch (e: Exception) {
-                                    showStatus("Add failed: ${e.message}", isError = true)
-                                }
-                            }
-                        }
-                    })
-
-                    container.addView(outlinedButton("Add multiple from history") {
-                        bulkAddFromHistoryDialog(chainId, wallet) { render() }
-                    })
-
-                    container.addView(outlinedButton("Add multiple by address") {
-                        bulkAddByAddressDialog(chainId, wallet) { render() }
-                    })
-
-                    container.addView(outlinedButton("Back up chainmark key") {
-                        backupChainmarkKeyWithBiometric(wallet)
-                    })
-
-                    container.addView(outlinedButton("Restore chainmark key from backup") {
-                        promptRestoreChainmarkKey(wallet) { render() }
-                    })
-
-                    container.addView(outlinedButton("Forget chain/it on this device") {
-                        AlertDialog.Builder(this)
-                            .setTitle("Forget chain/it?")
-                            .setMessage(
-                                "Removes the chainmark key from this device. Your on-chain entries remain " +
-                                "permanent and you can restore by setting up again with the same wallet, " +
-                                "or by pasting in a backup of the key."
-                            )
-                            .setPositiveButton("Forget") { _, _ ->
-                                chainmarkController.forget(wallet)
-                                showStatus("chain/it forgotten on this device.")
-                                render()
-                            }
-                            .setNegativeButton("Cancel", null)
-                            .show()
-                    })
-                }
-            }
-        }
-
-        render()
-
-        val scroll = androidx.core.widget.NestedScrollView(this).apply {
-            addView(container)
-        }
-        dialog.setContentView(scroll)
-        dialog.show()
-    }
-
-    private fun chainmarkEntryRow(
-        entry: ChainmarkEntry,
-        dateFormat: java.text.SimpleDateFormat,
-        dialog: BottomSheetDialog,
-        onChanged: () -> Unit,
-    ): View {
-        val dp = resources.displayMetrics.density
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val p = (8 * dp).toInt()
-            setPadding(p, p, p, p)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = (4 * dp).toInt() }
-            isClickable = true
-            isFocusable = true
-        }
-        val titleLine = entry.title.ifEmpty { "Untitled" }
-        row.addView(TextView(this).apply {
-            text = titleLine
-            setTextColor(BONE)
-            textSize = 13f
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        })
-        row.addView(TextView(this).apply {
-            text = "${entry.addr.take(10)}…  ${if (entry.ts > 0) dateFormat.format(java.util.Date(entry.ts * 1000)) else ""}"
-            setTextColor(ASH)
-            textSize = 10f
-        })
-
-        row.setOnClickListener {
-            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText("etch address", entry.addr))
-            showStatus("Address copied")
-        }
-
-        row.setOnLongClickListener {
-            val session = walletSession.state.value as? SessionState.Connected ?: return@setOnLongClickListener true
-            AlertDialog.Builder(this)
-                .setTitle("Hide from chain/it?")
-                .setMessage(
-                    "Writes a permanent tombstone to your on-chain chainmarks. The etch itself stays " +
-                    "on the network. Costs one wallet transaction."
-                )
-                .setPositiveButton("Hide") { _, _ ->
-                    lifecycleScope.launch {
-                        try {
-                            chainmarkController.hide(session.chainId, session.address, entry.addr)
-                            (row.parent as? LinearLayout)?.removeView(row)
-                            showStatus("Hide queued.")
-                            onChanged()
-                        } catch (e: Exception) {
-                            showStatus("Hide failed: ${e.message}", isError = true)
-                        }
-                    }
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-            true
-        }
-        return row
-    }
-
-    private fun backupChainmarkKeyWithBiometric(walletAddress: String) {
-        val authenticators = BiometricManager.Authenticators.BIOMETRIC_WEAK or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        val canAuth = BiometricManager.from(this).canAuthenticate(authenticators)
-        if (canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
-            showChainmarkKeyBackup(walletAddress)
-            return
-        }
-        val executor = ContextCompat.getMainExecutor(this)
-        val prompt = BiometricPrompt(this, executor, object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                showChainmarkKeyBackup(walletAddress)
-            }
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
-                    errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON) {
-                    showStatus("Authentication failed: $errString", isError = true)
-                }
-            }
-        })
-        prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Back up chainmark key")
-            .setDescription("Authenticate to reveal the 32-byte key")
-            .setAllowedAuthenticators(authenticators)
-            .build())
-    }
-
-    private fun showChainmarkKeyBackup(walletAddress: String) {
-        val key = chainmarkController.exportKey(walletAddress)
-        if (key == null) {
-            showStatus("No chainmark key to back up", isError = true)
-            return
-        }
-        val hex = key.joinToString("") { "%02x".format(it.toInt() and 0xff) }
-        val dp = resources.displayMetrics.density
-        val pad = (16 * dp).toInt()
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-        }
-        layout.addView(TextView(this).apply {
-            text = "Save this in a password manager. Anyone with it can decrypt your chainmark entries on chain. The key is bound to this wallet only."
-            setTextColor(ASH)
-            textSize = 12f
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = (12 * dp).toInt() }
-        })
-        layout.addView(TextView(this).apply {
-            text = hex
-            setTextColor(BONE)
-            textSize = 12f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setTextIsSelectable(true)
-        })
-        AlertDialog.Builder(this)
-            .setTitle("Chainmark key (hex)")
-            .setView(layout)
-            .setPositiveButton("Copy") { _, _ ->
-                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("chainmark key", hex))
-                showStatus("Chainmark key copied")
-            }
-            .setNegativeButton("Close", null)
-            .show()
-    }
-
-    private fun promptRestoreChainmarkKey(walletAddress: String, onDone: () -> Unit) {
-        val dp = resources.displayMetrics.density
-        val pad = (16 * dp).toInt()
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-        }
-        layout.addView(TextView(this).apply {
-            text = "Paste the 64-character hex key from a previous backup. Replaces the current device's key."
-            setTextColor(ASH)
-            textSize = 12f
-        })
-        val input = EditText(this).apply {
-            hint = "64-char hex"
-            setSingleLine(true)
-        }
-        layout.addView(input)
-        AlertDialog.Builder(this)
-            .setTitle("Restore chainmark key")
-            .setView(layout)
-            .setPositiveButton("Restore") { _, _ ->
-                val raw = input.text.toString().trim().removePrefix("0x")
-                val bytes = try {
-                    require(raw.length == 64) { "expected 64 hex chars, got ${raw.length}" }
-                    ByteArray(32) { i ->
-                        ((Character.digit(raw[i * 2], 16) shl 4) + Character.digit(raw[i * 2 + 1], 16)).toByte()
-                    }
-                } catch (e: Exception) {
-                    showStatus("Invalid key: ${e.message}", isError = true)
-                    return@setPositiveButton
-                }
-                try {
-                    chainmarkController.importKey(walletAddress, bytes)
-                    showStatus("Chainmark key restored. Tap Sync chainmarks.")
-                    onDone()
-                } catch (e: Exception) {
-                    showStatus("Restore failed: ${e.message}", isError = true)
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun bulkAddFromHistoryDialog(
-        chainId: String,
-        walletAddress: String,
-        onDone: () -> Unit,
-    ) {
-        val historyEntries = etchHistory.load().filter { !it.isPrivate && it.address.isNotBlank() }
-        if (historyEntries.isEmpty()) {
-            showStatus("No public etches in history.", isError = true)
-            return
-        }
-
-        val dialog = BottomSheetDialog(this, R.style.SheetDialog)
-        val dp = resources.displayMetrics.density
-        val pad = (24 * dp).toInt()
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-            setBackgroundColor(INK)
-        }
-
-        root.addView(TextView(this).apply {
-            text = "Add multiple from history"
-            setTextColor(BONE)
-            textSize = 20f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = (4 * dp).toInt() }
-        })
-        root.addView(TextView(this).apply {
-            text = "Tick the public etches to add. ~130 small entries fit in one batch tx; bigger lists split into multiple wallet prompts."
-            setTextColor(ASH)
-            textSize = 12f
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = (12 * dp).toInt() }
-        })
-
-        val countText = TextView(this).apply {
-            text = "0 selected"
-            setTextColor(ASH)
-            textSize = 12f
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = (8 * dp).toInt() }
-        }
-        root.addView(countText)
-
-        val checkboxes = mutableListOf<android.widget.CheckBox>()
-        for (entry in historyEntries) {
-            val cb = android.widget.CheckBox(this).apply {
-                text = "${entry.title.ifEmpty { "Untitled" }}\n${entry.address.take(10)}…"
-                setTextColor(BONE)
-                isChecked = false
-            }
-            checkboxes += cb
-            root.addView(cb)
-        }
-
-        val actionRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = (16 * dp).toInt() }
-        }
-        val cancelBtn = com.google.android.material.button.MaterialButton(
-            this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle,
-        ).apply {
-            text = "Cancel"
-            isAllCaps = false
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = (8 * dp).toInt()
-            }
-            setOnClickListener { dialog.dismiss() }
-        }
-        val addBtn = com.google.android.material.button.MaterialButton(this).apply {
-            text = "Add 0"
-            isAllCaps = false
-            isEnabled = false
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        actionRow.addView(cancelBtn)
-        actionRow.addView(addBtn)
-        root.addView(actionRow)
-
-        fun refreshCount() {
-            val n = checkboxes.count { it.isChecked }
-            countText.text = "$n selected"
-            addBtn.text = if (n == 0) "Add" else "Add $n"
-            addBtn.isEnabled = n > 0
-        }
-        for (cb in checkboxes) cb.setOnCheckedChangeListener { _, _ -> refreshCount() }
-
-        addBtn.setOnClickListener {
-            val selected = checkboxes.zip(historyEntries)
-                .filter { (cb, _) -> cb.isChecked }
-                .map { (_, entry) -> entry.address to entry.title }
-            if (selected.isEmpty()) return@setOnClickListener
-            dialog.dismiss()
-            lifecycleScope.launch {
-                try {
-                    showStatus("Sending ${selected.size} entries…")
-                    val txHashes = chainmarkController.addMultiple(chainId, walletAddress, selected, WireEntry.ACTION_ADD)
-                    val plural = if (txHashes.size > 1) "${txHashes.size} txs" else "1 tx"
-                    showStatus("Synced ${selected.size} entries in $plural")
-                    onDone()
-                } catch (e: Exception) {
-                    showStatus("Bulk add failed: ${e.message}", isError = true)
-                }
-            }
-        }
-
-        val scroll = androidx.core.widget.NestedScrollView(this).apply { addView(root) }
-        dialog.setContentView(scroll)
-        dialog.show()
-    }
-
-    // Parses a pasted, line-separated list. Each non-empty line must start with a
-    // 64-char hex address; everything after the first whitespace is the optional title.
-    // Returns (validEntries, lineNumbersThatFailed).
-    private fun parseAddressList(input: String): Pair<List<Pair<String, String>>, List<Int>> {
-        val out = mutableListOf<Pair<String, String>>()
-        val bad = mutableListOf<Int>()
-        input.split("\n").forEachIndexed { i, raw ->
-            val line = raw.trim()
-            if (line.isEmpty()) return@forEachIndexed
-            val parts = line.split(Regex("\\s+"), limit = 2)
-            val addr = parts[0].lowercase().removePrefix("0x")
-            val title = if (parts.size > 1) parts[1].trim() else ""
-            if (addr.length == 64 && addr.all { it in '0'..'9' || it in 'a'..'f' }) {
-                out += addr to title
-            } else {
-                bad += i + 1
-            }
-        }
-        return out to bad
-    }
-
-    private fun bulkAddByAddressDialog(
-        chainId: String,
-        walletAddress: String,
-        onDone: () -> Unit,
-    ) {
-        val dp = resources.displayMetrics.density
-        val pad = (16 * dp).toInt()
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-        }
-        layout.addView(TextView(this).apply {
-            text = "Paste 64-char etch addresses, one per line. Optional: add a space and a title after each address."
-            setTextColor(ASH)
-            textSize = 12f
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = (8 * dp).toInt() }
-        })
-        val input = EditText(this).apply {
-            hint = "abcdef…  optional title\n0x1234…  another title\n…"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            setSingleLine(false)
-            minLines = 6
-            gravity = android.view.Gravity.TOP or android.view.Gravity.START
-        }
-        layout.addView(input)
-
-        AlertDialog.Builder(this)
-            .setTitle("Add multiple by address")
-            .setView(layout)
-            .setPositiveButton("Add") { _, _ ->
-                val (entries, badLines) = parseAddressList(input.text.toString())
-                if (entries.isEmpty()) {
-                    showStatus("No valid addresses found", isError = true)
-                    return@setPositiveButton
-                }
-                lifecycleScope.launch {
-                    try {
-                        showStatus("Adding ${entries.size}…")
-                        val txHashes = chainmarkController.addMultiple(
-                            chainId, walletAddress, entries, WireEntry.ACTION_ADD,
-                        )
-                        val plural = if (txHashes.size > 1) "${txHashes.size} txs" else "1 tx"
-                        val skip = if (badLines.isNotEmpty()) " (skipped ${badLines.size} invalid line${if (badLines.size > 1) "s" else ""})" else ""
-                        showStatus("Added ${entries.size} in $plural$skip")
-                        onDone()
-                    } catch (e: Exception) {
-                        showStatus("Bulk add failed: ${e.message}", isError = true)
-                    }
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun promptAddByAddress(onSubmit: (String, String) -> Unit) {
-        val dp = resources.displayMetrics.density
-        val pad = (16 * dp).toInt()
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-        }
-        val addrInput = EditText(this).apply {
-            hint = "64-character hex address"
-            setSingleLine(true)
-        }
-        val titleInput = EditText(this).apply {
-            hint = "Title (optional)"
-            setSingleLine(true)
-        }
-        layout.addView(addrInput)
-        layout.addView(titleInput)
-        AlertDialog.Builder(this)
-            .setTitle("Add to chainmarks")
-            .setView(layout)
-            .setPositiveButton("Add") { _, _ ->
-                onSubmit(
-                    addrInput.text.toString().trim(),
-                    titleInput.text.toString().trim(),
-                )
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
     // ── Backup / Restore ──────────────────────────────────────────
-
-    // One backup passphrase per wallet, cached in EncryptedSharedPreferences.
-    // The user still has the passphrase on paper / in a password manager —
-    // this is a convenience cache so they don't re-pick a fresh passphrase
-    // for every backup. EncryptedSharedPreferences is Keystore-backed, so
-    // the on-disk bytes are AES-256 encrypted at rest. Wallet-scoped key
-    // means swapping wallets resets the cache.
-    private fun cachedBackupPassphraseKey(wallet: String): String =
-        "backup_passphrase:${wallet.lowercase()}"
-
-    private fun hasCachedBackupPassphrase(wallet: String): Boolean =
-        encryptedPrefs.contains(cachedBackupPassphraseKey(wallet))
-
-    private fun loadCachedBackupPassphrase(wallet: String): String? =
-        encryptedPrefs.getString(cachedBackupPassphraseKey(wallet), null)
-
-    private fun saveCachedBackupPassphrase(wallet: String, passphrase: String) {
-        encryptedPrefs.edit().putString(cachedBackupPassphraseKey(wallet), passphrase).apply()
-    }
-
-    private fun clearCachedBackupPassphrase(wallet: String) {
-        encryptedPrefs.edit().remove(cachedBackupPassphraseKey(wallet)).apply()
-    }
 
     private fun currentWalletAddress(): String? {
         val s = walletSession.state.value
         return if (s is SessionState.Connected) s.address else null
-    }
-
-    private fun promptBackupPassword(entryCount: Int) {
-        val wallet = currentWalletAddress()
-        if (wallet != null && hasCachedBackupPassphrase(wallet)) {
-            promptEtchBackupWithCachedPassphrase(wallet, entryCount)
-            return
-        }
-        val dp = resources.displayMetrics.density
-        val pad = (16 * dp).toInt()
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, 0)
-        }
-
-        layout.addView(TextView(this).apply {
-            text = "Choose a passphrase. Reuse it across devices, or pick a fresh one each time. " +
-                "You'll need it to restore."
-            setTextColor(BONE)
-        })
-
-        val generateBtn = android.widget.Button(this).apply {
-            text = "Generate strong passphrase"
-            val mt = (12 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-        }
-        layout.addView(generateBtn)
-
-        val passwordInput = EditText(this).apply {
-            hint = "Password (or generated passphrase)"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setTextColor(BONE)
-            val mt = (12 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-        }
-        layout.addView(passwordInput)
-
-        val strengthLabel = TextView(this).apply {
-            textSize = 12f
-            val mt = (4 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-        }
-        layout.addView(strengthLabel)
-        passwordInput.addTextChangedListener { applyStrength(strengthLabel, it?.toString().orEmpty()) }
-
-        val confirmInput = EditText(this).apply {
-            hint = "Confirm password"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setTextColor(BONE)
-            val mt = (8 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-        }
-        layout.addView(confirmInput)
-
-        // Reveal panel — only added once a passphrase is generated.
-        val revealLabel = TextView(this).apply {
-            text = ""
-            setTextColor(COPPER_BRIGHT)
-            textSize = 12f
-            val mt = (12 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-            visibility = View.GONE
-        }
-        val revealText = TextView(this).apply {
-            text = ""
-            setTextColor(BONE)
-            textSize = 14f
-            typeface = android.graphics.Typeface.MONOSPACE
-            val padIn = (10 * dp).toInt()
-            setPadding(padIn, padIn, padIn, padIn)
-            setBackgroundColor(0xFF0A0A0A.toInt())
-            val mt = (6 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-            visibility = View.GONE
-        }
-        val revealHint = TextView(this).apply {
-            text = "Write this down — there is no recovery if lost."
-            setTextColor(ASH)
-            textSize = 11f
-            val mt = (4 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-            visibility = View.GONE
-        }
-        layout.addView(revealLabel)
-        layout.addView(revealText)
-        layout.addView(revealHint)
-
-        generateBtn.setOnClickListener {
-            val phrase = BackupPassphrase.generate(6)
-            // Drop the password-mask so the user can read what we generated.
-            passwordInput.inputType = android.text.InputType.TYPE_CLASS_TEXT
-            confirmInput.inputType = android.text.InputType.TYPE_CLASS_TEXT
-            passwordInput.setText(phrase)
-            confirmInput.setText(phrase)
-            revealLabel.text = "Generated passphrase — write it down before you tap Encrypt"
-            revealText.text = phrase
-            revealLabel.visibility = View.VISIBLE
-            revealText.visibility = View.VISIBLE
-            revealHint.visibility = View.VISIBLE
-            // Tap-to-copy on the displayed phrase.
-            revealText.setOnClickListener {
-                val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("etchit backup passphrase", phrase))
-                Snackbar.make(binding.root, "Passphrase copied", Snackbar.LENGTH_SHORT).show()
-            }
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Backup private etches")
-            .setView(layout)
-            .setPositiveButton("Encrypt") { _, _ ->
-                val pw = passwordInput.text.toString()
-                val confirm = confirmInput.text.toString()
-                if (pw.length < MIN_BACKUP_PASSWORD_LEN) {
-                    showStatus("Password must be at least $MIN_BACKUP_PASSWORD_LEN characters", isError = true)
-                    return@setPositiveButton
-                }
-                if (pw != confirm) {
-                    showStatus("Passwords don't match", isError = true)
-                    return@setPositiveButton
-                }
-                confirmAndEtchBackup(pw, entryCount)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun applyStrength(label: TextView, pw: String) {
-        if (pw.isEmpty()) { label.text = ""; return }
-        val classes = listOf(
-            pw.any { it.isLowerCase() },
-            pw.any { it.isUpperCase() },
-            pw.any { it.isDigit() },
-            pw.any { !it.isLetterOrDigit() },
-        ).count { it }
-        val (text, color) = when {
-            pw.length < MIN_BACKUP_PASSWORD_LEN ->
-                "Weak — use at least $MIN_BACKUP_PASSWORD_LEN characters" to STATUS_RED
-            pw.length >= 12 || classes >= 3 -> "Strong" to STATUS_GREEN
-            else -> "OK — stronger with mixed character types" to COPPER_BRIGHT
-        }
-        label.text = text
-        label.setTextColor(color)
-    }
-
-    private fun confirmAndEtchBackup(password: String, entryCount: Int) {
-        val plaintext = privateDataStore.exportAll()
-        val encrypted = BackupCrypto.encrypt(plaintext, password)
-        val sizeStr = PasteUtils.formatSize(encrypted.size)
-
-        AlertDialog.Builder(this)
-            .setTitle("Backup ready")
-            .setMessage(
-                "$sizeStr encrypted \u2022 $entryCount private etch${if (entryCount > 1) "es" else ""}\n\n" +
-                "Etch this backup to the network? It will cost a small amount of ANT. " +
-                "Anyone can fetch it but only your password can decrypt it."
-            )
-            .setPositiveButton("Etch backup") { _, _ ->
-                etchBackupData(encrypted, password)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    // Pre-flight dialog when the wallet already has a cached backup passphrase.
-    // Skips the password entry form and goes straight to encrypt + etch using
-    // the cached value. Inline links offer "show" and "use a different one"
-    // for the rare cases where the user wants to verify or rotate.
-    private fun promptEtchBackupWithCachedPassphrase(wallet: String, entryCount: Int) {
-        val cached = loadCachedBackupPassphrase(wallet)
-        if (cached == null) {
-            // Cache lookup failed \u2014 fall back to normal flow.
-            clearCachedBackupPassphrase(wallet)
-            promptBackupPassword(entryCount)
-            return
-        }
-        val dp = resources.displayMetrics.density
-        val pad = (16 * dp).toInt()
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, 0)
-        }
-        layout.addView(TextView(this).apply {
-            text = "Recovery passphrase set for this wallet. New backup will encrypt with the same passphrase you wrote down \u2014 no entry needed.\n\n" +
-                "$entryCount private etch${if (entryCount > 1) "es" else ""} will be encrypted and etched to the network."
-            setTextColor(BONE)
-        })
-        val linksRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            val mt = (16 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-        }
-        val showLink = TextView(this).apply {
-            text = "Show passphrase"
-            setTextColor(COPPER_BRIGHT)
-            textSize = 13f
-            paint.isUnderlineText = true
-            val mr = (24 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { rightMargin = mr }
-        }
-        val differentLink = TextView(this).apply {
-            text = "Use a different one"
-            setTextColor(COPPER_BRIGHT)
-            textSize = 13f
-            paint.isUnderlineText = true
-        }
-        linksRow.addView(showLink)
-        linksRow.addView(differentLink)
-        layout.addView(linksRow)
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Back up private etches")
-            .setView(layout)
-            .setPositiveButton("Etch backup") { _, _ ->
-                confirmAndEtchBackup(cached, entryCount)
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-
-        showLink.setOnClickListener {
-            dialog.dismiss()
-            showCachedPassphraseDialog(cached) {
-                promptEtchBackupWithCachedPassphrase(wallet, entryCount)
-            }
-        }
-        differentLink.setOnClickListener {
-            dialog.dismiss()
-            promptUseDifferentPassphrase(wallet, entryCount)
-        }
-        dialog.show()
-    }
-
-    private fun promptUseDifferentPassphrase(wallet: String, entryCount: Int) {
-        AlertDialog.Builder(this)
-            .setTitle("Use a different passphrase?")
-            .setMessage(
-                "Your current cached passphrase will be removed from this device. " +
-                "Existing backups encrypted with the old passphrase still decrypt with it (you'd need to remember both for those), " +
-                "and your next new backup will use whatever passphrase you pick now."
-            )
-            .setPositiveButton("Use a different one") { _, _ ->
-                clearCachedBackupPassphrase(wallet)
-                promptBackupPassword(entryCount)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showCachedPassphraseDialog(passphrase: String, onDismiss: () -> Unit) {
-        val dp = resources.displayMetrics.density
-        val pad = (16 * dp).toInt()
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, 0)
-        }
-        layout.addView(TextView(this).apply {
-            text = "Your recovery passphrase. Tap to copy. Anyone with this can decrypt your backup blobs."
-            setTextColor(BONE)
-            textSize = 13f
-        })
-        val phraseView = TextView(this).apply {
-            text = passphrase
-            setTextColor(BONE)
-            typeface = android.graphics.Typeface.MONOSPACE
-            textSize = 14f
-            val padIn = (10 * dp).toInt()
-            setPadding(padIn, padIn, padIn, padIn)
-            setBackgroundColor(0xFF0A0A0A.toInt())
-            val mt = (16 * dp).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = mt }
-        }
-        phraseView.setOnClickListener {
-            val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            cm.setPrimaryClip(android.content.ClipData.newPlainText("etchit backup passphrase", passphrase))
-            Snackbar.make(binding.root, "Passphrase copied", Snackbar.LENGTH_SHORT).show()
-        }
-        layout.addView(phraseView)
-        AlertDialog.Builder(this)
-            .setTitle("Recovery passphrase")
-            .setView(layout)
-            .setPositiveButton("Done") { _, _ -> onDismiss() }
-            .setOnCancelListener { onDismiss() }
-            .show()
     }
 
     private fun etchBackupData(data: ByteArray, passphrase: String) {
@@ -2867,7 +1636,7 @@ class MainActivity : AppCompatActivity() {
 
                 when (result) {
                     is EtchSigner.EtchResult.Public -> {
-                        showResult("Backup", result.address, "")
+                        resultCard.show("Backup", result.address, "")
                         binding.resultContent.text =
                             "Your private etches are backed up.\n\n" +
                             "Save this address — with your password it's your recovery key on any device."
@@ -2876,7 +1645,7 @@ class MainActivity : AppCompatActivity() {
                         // Cache the passphrase under this wallet so future backups
                         // reuse it silently. Idempotent — overwrites with the same
                         // value if the user is re-using their cached passphrase.
-                        currentWalletAddress()?.let { saveCachedBackupPassphrase(it, passphrase) }
+                        currentWalletAddress()?.let { backupPassphraseCache.save(it, passphrase) }
                     }
                     is EtchSigner.EtchResult.Private -> {
                         // Shouldn't happen — backups are always public
@@ -2901,192 +1670,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Thin delegate to ui/BackupRestorePrompt — used as the
+    // onBackupDetected callback wired into ResultCardView.
     private fun promptRestoreBackup(encryptedData: ByteArray) {
-        val dp = resources.displayMetrics.density
-        val pad = (20 * dp).toInt()
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, 0)
-        }
-
-        layout.addView(TextView(this).apply {
-            text = "This is an encrypted etchit backup. Enter the 6-word recovery passphrase to restore your private etches."
-            setTextColor(BONE)
-        })
-
-        // ── 3×2 grid of word boxes ──
-        val gridWrap = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = (20 * dp).toInt() }
-        }
-        layout.addView(gridWrap)
-
-        val boxes = mutableListOf<EditText>()
-        repeat(2) { rowIdx ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { if (rowIdx > 0) topMargin = (10 * dp).toInt() }
-            }
-            repeat(3) { colIdx ->
-                val idx = rowIdx * 3 + colIdx
-                if (colIdx > 0) {
-                    row.addView(TextView(this).apply {
-                        text = "—"
-                        setTextColor(ASH)
-                        textSize = 14f
-                        val mh = (6 * dp).toInt()
-                        setPadding(mh, 0, mh, 0)
-                    })
-                }
-                val box = EditText(this).apply {
-                    hint = "${idx + 1}"
-                    setTextColor(BONE)
-                    setHintTextColor(ASH)
-                    textSize = 14f
-                    typeface = android.graphics.Typeface.MONOSPACE
-                    setPadding((10 * dp).toInt(), (10 * dp).toInt(), (10 * dp).toInt(), (10 * dp).toInt())
-                    inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                        android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                    isSingleLine = true
-                    imeOptions = if (idx == 5) android.view.inputmethod.EditorInfo.IME_ACTION_DONE
-                                 else android.view.inputmethod.EditorInfo.IME_ACTION_NEXT
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                }
-                row.addView(box)
-                boxes += box
-            }
-            gridWrap.addView(row)
-        }
-
-        // Auto-advance on space/dash; backspace on empty → previous; paste of dashed phrase distributes across boxes.
-        for ((idx, box) in boxes.withIndex()) {
-            box.addTextChangedListener(object : android.text.TextWatcher {
-                private var skip = false
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-                override fun afterTextChanged(s: android.text.Editable?) {
-                    if (skip || s == null) return
-                    val text = s.toString()
-                    // Paste of full dashed/spaced phrase
-                    if (text.contains('-') || text.contains(' ') || text.contains('\n')) {
-                        val parts = text.split(Regex("[\\s\\-—]+")).filter { it.isNotEmpty() }
-                        if (parts.size >= 2 || (parts.size == 1 && (text.endsWith(' ') || text.endsWith('-')))) {
-                            skip = true
-                            for ((i, p) in parts.withIndex()) {
-                                val target = idx + i
-                                if (target < boxes.size) {
-                                    boxes[target].setText(p.lowercase())
-                                }
-                            }
-                            // Empty out beyond if the paste was exactly to the end
-                            val nextEmpty = (idx + parts.size).coerceAtMost(boxes.size - 1)
-                            boxes[nextEmpty].requestFocus()
-                            boxes[nextEmpty].setSelection(boxes[nextEmpty].text.length)
-                            skip = false
-                            return
-                        }
-                        // Single-word followed by separator → advance
-                        skip = true
-                        s.replace(0, s.length, parts.firstOrNull().orEmpty().lowercase())
-                        skip = false
-                        if (idx < boxes.size - 1) boxes[idx + 1].requestFocus()
-                    }
-                }
-            })
-            box.setOnKeyListener { _, keyCode, event ->
-                if (event.action == android.view.KeyEvent.ACTION_DOWN &&
-                    keyCode == android.view.KeyEvent.KEYCODE_DEL &&
-                    box.text.isEmpty() && idx > 0) {
-                    boxes[idx - 1].requestFocus()
-                    boxes[idx - 1].setSelection(boxes[idx - 1].text.length)
-                    return@setOnKeyListener true
-                }
-                false
-            }
-        }
-
-        // ── Custom password fallback (hidden by default) ──
-        val customInput = EditText(this).apply {
-            hint = "Custom password"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setTextColor(BONE)
-            setHintTextColor(ASH)
-            visibility = View.GONE
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = (20 * dp).toInt() }
-        }
-        layout.addView(customInput)
-
-        var customMode = false
-        val toggleLink = TextView(this).apply {
-            text = "Use a custom password instead"
-            setTextColor(0xFFc9732b.toInt())
-            textSize = 13f
-            paint.isUnderlineText = true
-            val mt = (16 * dp).toInt()
-            val mb = (4 * dp).toInt()
-            setPadding(0, mt, 0, mb)
-            setOnClickListener {
-                customMode = !customMode
-                if (customMode) {
-                    gridWrap.visibility = View.GONE
-                    customInput.visibility = View.VISIBLE
-                    customInput.requestFocus()
-                    text = "Use the 6-word passphrase instead"
-                } else {
-                    gridWrap.visibility = View.VISIBLE
-                    customInput.visibility = View.GONE
-                    boxes[0].requestFocus()
-                    text = "Use a custom password instead"
-                }
-            }
-        }
-        layout.addView(toggleLink)
-
-        boxes[0].requestFocus()
-
-        AlertDialog.Builder(this)
-            .setTitle("Restore backup")
-            .setView(layout)
-            .setPositiveButton("Restore") { _, _ ->
-                val pw = if (customMode) {
-                    customInput.text.toString()
-                } else {
-                    boxes.joinToString("-") { it.text.toString().trim().lowercase() }
-                }
-                val decrypted = BackupCrypto.decrypt(encryptedData, pw)
-                if (decrypted == null) {
-                    showStatus("Wrong password or corrupted backup", isError = true)
-                    return@setPositiveButton
-                }
-                val imported = privateDataStore.importAll(decrypted)
-                if (imported > 0) {
-                    showStatus("Restored $imported private etch${if (imported > 1) "es" else ""}")
-                    Snackbar.make(binding.root, "Restored $imported private etch${if (imported > 1) "es" else ""}", Snackbar.LENGTH_LONG)
-                        .setBackgroundTint(INK_3)
-                        .setTextColor(STATUS_GREEN)
-                        .show()
-                } else {
-                    showStatus("All etches already on this device")
-                }
-                // Cache the restore passphrase under this wallet so future
-                // backups on this device automatically reuse it. Symmetric with
-                // the backup-side caching, and avoids forcing a second
-                // passphrase entry on a fresh device.
-                currentWalletAddress()?.let { saveCachedBackupPassphrase(it, pw) }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        showRestoreBackupPrompt(
+            activity = this,
+            snackbarAnchor = binding.root,
+            encryptedData = encryptedData,
+            privateDataStore = privateDataStore,
+            onShowStatus = ::showStatus,
+            currentWalletAddress = ::currentWalletAddress,
+            savePassphrase = backupPassphraseCache::save,
+        )
     }
 
     // ── Private Etch Retrieval ──────────────────────────────────────
@@ -3152,7 +1747,7 @@ class MainActivity : AppCompatActivity() {
                 val raw = data.toString(Charsets.UTF_8)
                 val (title, content) = parseEnvelope(raw)
 
-                showResult(
+                resultCard.show(
                     title = title.ifEmpty { "Retrieved" },
                     address = "Private \u2022 stored on device",
                     content = content,
@@ -3178,106 +1773,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
-    // ── Content Display ──────────────────────────────────────────────
-
-    private fun displayFetchedData(data: ByteArray, address: String) {
-        val detected = ContentDetector.detect(data)
-        val sizeStr = PasteUtils.formatSize(data.size)
-
-        when (detected.type) {
-            ContentDetector.ContentType.ETCH_ENVELOPE -> {
-                val raw = data.toString(Charsets.UTF_8)
-                val (title, content) = parseEnvelope(raw)
-                showResult(title.ifEmpty { "Retrieved" }, address, content)
-                showStatus("Retrieved \u2022 $sizeStr")
-            }
-            ContentDetector.ContentType.IMAGE -> {
-                val bitmap = android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size)
-                if (bitmap != null) {
-                    showResult("Image", address, "")
-                    binding.resultContent.visibility = View.GONE
-                    binding.resultImage.setImageBitmap(bitmap)
-                    binding.resultImage.visibility = View.VISIBLE
-                    showStatus("Retrieved image \u2022 $sizeStr")
-                } else {
-                    showBinaryResult(data, detected, address, sizeStr)
-                }
-            }
-            ContentDetector.ContentType.TEXT -> {
-                val text = data.toString(Charsets.UTF_8)
-                showResult("Raw text", address, text)
-                showStatus("Retrieved text \u2022 $sizeStr")
-            }
-            ContentDetector.ContentType.BACKUP -> {
-                promptRestoreBackup(data)
-            }
-            ContentDetector.ContentType.BINARY -> {
-                showBinaryResult(data, detected, address, sizeStr)
-            }
-        }
-    }
-
-    /**
-     * Show binary file info in the result card with an explicit Save
-     * button. Data stays in memory — nothing persists unless the user
-     * taps Save. The app never stores fetched content.
-     */
-    private fun showBinaryResult(
-        data: ByteArray,
-        detected: ContentDetector.Result,
-        address: String,
-        sizeStr: String,
-    ) {
-        showResult(
-            "${detected.extension.uppercase()} file",
-            address,
-            "${detected.mimeType}\n$sizeStr",
-        )
-        // Binary preview is just mime/size \u2014 fullscreen-expanding it isn't
-        // useful, so suppress the hint that showResult turned on.
-        binding.resultExpandHint.visibility = View.GONE
-        showStatus("Retrieved ${detected.extension.uppercase()} \u2022 $sizeStr")
-
-        // Replace "Copy Content" with "Save to Downloads"
-        binding.copyContentBtn.text = "Save to Downloads"
-        binding.copyContentBtn.setOnClickListener {
-            val filename = "etchit_${address.take(12)}.${detected.extension}"
-            try {
-                val resolver = contentResolver
-                val values = android.content.ContentValues().apply {
-                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename)
-                    put(android.provider.MediaStore.Downloads.MIME_TYPE, detected.mimeType)
-                    put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
-                }
-                val uri = resolver.insert(
-                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
-                ) ?: throw RuntimeException("Failed to create file")
-
-                resolver.openOutputStream(uri)?.use { it.write(data) }
-
-                values.clear()
-                values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
-                resolver.update(uri, values, null, null)
-
-                Snackbar.make(binding.root, "Saved: $filename", Snackbar.LENGTH_LONG)
-                    .setBackgroundTint(INK_3)
-                    .setTextColor(STATUS_GREEN)
-                    .setAction("Open") {
-                        val openIntent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(uri, detected.mimeType)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        startActivity(Intent.createChooser(openIntent, "Open with"))
-                    }
-                    .setActionTextColor(COPPER)
-                    .show()
-            } catch (e: Exception) {
-                showStatus("Failed to save: ${e.shortMessage()}", isError = true)
-            }
-        }
-    }
-
     // ── Share ──────────────────────────────────────────────────────
 
     private fun shareResult() {
@@ -3300,340 +1795,12 @@ class MainActivity : AppCompatActivity() {
     private fun parseEnvelope(raw: String): Pair<String, String> =
         PasteUtils.parseEnvelope(raw)
 
-    // Plain fullscreen text editor — covers two cases triggered by double-tap.
-    //   editable=true:  edit the etch content in a focused fullscreen editor.
-    //                    onCommit fires with the latest text on dismiss
-    //                    (close button, back, swipe — auto-commit, no Cancel).
-    //   editable=false: read-only fullscreen view of fetched text that was
-    //                    truncated to maxLines in the result card.
-    // Top bar holds an ✕ close button and a "Save" action that uses the SAF
-    // CreateDocument launcher to write the current text out as .txt.
-    private fun showFullScreenTextDialog(
-        title: String,
-        initialText: String,
-        editable: Boolean,
-        onCommit: ((String) -> Unit)? = null,
-    ) {
-        val dp = resources.displayMetrics.density
-        val pad12 = (12 * dp).toInt()
-        val pad16 = (16 * dp).toInt()
-
-        val dialog = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(INK)
-            fitsSystemWindows = true
-        }
-
-        // ── Top bar ── ← back · optional title · char count · Save
-        val toolbar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setBackgroundColor(INK_2)
-            elevation = 4 * dp
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                (56 * dp).toInt(),
-            )
-        }
-        val closeBtn = android.widget.ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_menu_revert)
-            setColorFilter(BONE)
-            background = null
-            setPadding(pad12, pad12, pad12, pad12)
-            contentDescription = "Close"
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.MATCH_PARENT,
-            )
-        }
-        toolbar.addView(closeBtn)
-        if (title.isNotBlank()) {
-            toolbar.addView(TextView(this).apply {
-                text = title
-                setTextColor(BONE)
-                textSize = 15f
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                setPadding(pad12, 0, pad12, 0)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            })
-        } else {
-            toolbar.addView(View(this).apply {
-                layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
-            })
-        }
-        // Live character count — quietly tracks the typed text. Useful when
-        // you're padding out toward a length target or just curious about
-        // how long the etch will be.
-        val charCount = TextView(this).apply {
-            setTextColor(ASH)
-            textSize = 12f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, 0, pad12, 0)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-        }
-        toolbar.addView(charCount)
-        // Syntax-highlighter language picker. Auto-detects from the buffer's
-        // first non-blank line on open — Plain unless the heuristic is
-        // confident. The user can override via the picker.
-        var currentHighlighter: SyntaxHighlighter = SyntaxHighlighters.detectLanguage(initialText)
-        val langBtn = TextView(this).apply {
-            text = "{}"
-            setTextColor(if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) ASH else COPPER_BRIGHT)
-            textSize = 14f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(pad12, pad12, pad12, pad12)
-            isClickable = true
-            isFocusable = true
-            contentDescription = "Syntax highlighting"
-        }
-        toolbar.addView(langBtn)
-        val saveBtn = TextView(this).apply {
-            text = "Save"
-            setTextColor(COPPER_BRIGHT)
-            textSize = 14f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            letterSpacing = 0.04f
-            setPadding(pad16, pad12, pad16, pad12)
-            isClickable = true
-            isFocusable = true
-            contentDescription = "Save as file"
-        }
-        toolbar.addView(saveBtn)
-        root.addView(toolbar)
-
-        // 1dp copper-dim hairline under the toolbar — a single brand line
-        // separating chrome from writing surface.
-        root.addView(View(this).apply {
-            setBackgroundColor(0xFF8a4e1d.toInt()) // copper-dim
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                Math.max(1, (1 * dp).toInt()),
-            )
-        })
-
-        // ── Editor body ── breathable padding, generous line-height,
-        // fine line-number gutter on the left.
-        val editText = LineNumberEditText(this).apply {
-            setText(initialText)
-            setTextColor(BONE)
-            setHintTextColor(ASH)
-            textSize = 15f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setLineSpacing(0f, 1.6f)
-            // Left padding clears the gutter; right/top/bottom keep the
-            // breathable margins.
-            setPadding(
-                gutterWidthPx + (12 * dp).toInt(),
-                (28 * dp).toInt(),
-                (24 * dp).toInt(),
-                (24 * dp).toInt(),
-            )
-            gravity = android.view.Gravity.TOP or android.view.Gravity.START
-            setBackgroundColor(0)
-            isVerticalScrollBarEnabled = true
-            scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
-            overScrollMode = View.OVER_SCROLL_NEVER
-            // No wrapping — editor sizes to its longest line; the host
-            // SmartHorizontalScrollView pans sideways for long lines.
-            setHorizontallyScrolling(true)
-            if (editable) {
-                isFocusable = true
-                isFocusableInTouchMode = true
-                isCursorVisible = true
-                inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                    android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-                    android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                // Open at the start of the text so the user's reading mental
-                // model is "top-to-bottom" — the previous setSelection(end)
-                // forced the editor to scroll to the bottom on every paste.
-                setSelection(0)
-            } else {
-                isFocusable = false
-                isCursorVisible = false
-                inputType = android.text.InputType.TYPE_NULL
-                setTextIsSelectable(true)
-            }
-        }
-        // SmartHorizontalScrollView passes vertical drags straight through to
-        // the EditText (so up/down scroll stays at native speed) and only
-        // intercepts when the gesture is clearly horizontal — gives smooth
-        // sideways pan for long lines without slowing vertical scroll.
-        val editorScroll = SmartHorizontalScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f,
-            )
-            isHorizontalScrollBarEnabled = true
-            isFillViewport = true
-            overScrollMode = View.OVER_SCROLL_NEVER
-            scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
-            isSmoothScrollingEnabled = true
-        }
-        editText.layoutParams = android.widget.FrameLayout.LayoutParams(
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-        )
-        editorScroll.addView(editText)
-        root.addView(editorScroll)
-
-        // Pinch-to-zoom on the editor text — clamped between 10sp and 28sp.
-        // Gutter line numbers track automatically because they're drawn at
-        // the EditText's getLineBaseline(), which scales with textSize.
-        var currentTextSp = 15f
-        val minSp = 10f
-        val maxSp = 28f
-        val scaleDetector = android.view.ScaleGestureDetector(
-            this,
-            object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
-                override fun onScale(detector: android.view.ScaleGestureDetector): Boolean {
-                    val next = (currentTextSp * detector.scaleFactor).coerceIn(minSp, maxSp)
-                    if (next != currentTextSp) {
-                        currentTextSp = next
-                        editText.textSize = currentTextSp
-                    }
-                    return true
-                }
-            },
-        )
-        editText.setOnTouchListener { _, event ->
-            scaleDetector.onTouchEvent(event)
-            // Don't consume — EditText still needs to handle taps, typing, selection.
-            false
-        }
-
-        // Bind char-count + viewport-aware syntax re-highlight to the EditText.
-        fun updateCharCount() {
-            val n = editText.text.length
-            charCount.text = String.format(java.util.Locale.US, "%,d", n)
-        }
-        updateCharCount()
-        // Highlight model is deliberately simple: tokenize + apply spans once
-        // per text-change (debounced) or language-change. Scroll path does
-        // nothing — EditText handles painting natively, so vertical scroll
-        // stays at native speed.
-        //
-        // Trade-off: very large docs (~28K+ chars) can exceed Android's
-        // SpannableStringBuilder perf wall around 5-7K spans, in which case
-        // the tail of the document goes uncoloured. Smooth scroll is worth
-        // more than perfect coverage at the bottom of an enormous paste.
-        fun rehighlight() {
-            val text = editText.text ?: return
-            if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) {
-                SyntaxHighlighters.clear(text)
-                return
-            }
-            currentHighlighter.apply(text)
-        }
-        val rehighlightHandler = android.os.Handler(android.os.Looper.getMainLooper())
-        var rehighlightToken: Runnable? = null
-        fun scheduleRehighlight(delayMs: Long = 180L) {
-            rehighlightToken?.let { rehighlightHandler.removeCallbacks(it) }
-            val r = Runnable { rehighlight() }
-            rehighlightToken = r
-            rehighlightHandler.postDelayed(r, delayMs)
-        }
-        editText.addTextChangedListener(object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) {
-                updateCharCount()
-                scheduleRehighlight()
-            }
-        })
-        // Initial paint — TextWatcher only fires on text *change*, and the
-        // editor is opened with text pre-populated, so apply the auto-detected
-        // highlighter once now. Posted so the layout pass has a chance to
-        // settle before the spans land.
-        editText.post { rehighlight() }
-
-        langBtn.setOnClickListener {
-            val items = SyntaxHighlighters.all.map { it.displayName }.toTypedArray()
-            val currentIdx = SyntaxHighlighters.all.indexOf(currentHighlighter).coerceAtLeast(0)
-            AlertDialog.Builder(this)
-                .setTitle("Syntax highlighting")
-                .setSingleChoiceItems(items, currentIdx) { d, which ->
-                    currentHighlighter = SyntaxHighlighters.all[which]
-                    langBtn.setTextColor(if (currentHighlighter is SyntaxHighlighters.PlainHighlighter) ASH else COPPER_BRIGHT)
-                    rehighlight()
-                    d.dismiss()
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
-
-        dialog.setContentView(root)
-        dialog.window?.apply {
-            setLayout(
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-            )
-            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(INK_2))
-        }
-
-        // All exit paths (close button, back button, swipe) auto-commit when
-        // editable. setOnDismissListener fires for every dismiss flavour, so
-        // we don't need to special-case the close button.
-        dialog.setOnDismissListener {
-            if (editable) onCommit?.invoke(editText.text.toString())
-        }
-        closeBtn.setOnClickListener { dialog.dismiss() }
-        saveBtn.setOnClickListener {
-            pendingTextToSave = editText.text.toString()
-            val baseName = title.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "etchit" }
-            saveTextLauncher.launch("$baseName.txt")
-            dialog.dismiss()
-        }
-
-        dialog.show()
-        if (editable) {
-            editText.requestFocus()
-            val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
-                as android.view.inputmethod.InputMethodManager
-            imm.showSoftInput(editText, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
-        }
-        // requestFocus + IME show both trigger an auto-scroll-to-cursor; if
-        // the cursor lands anywhere past the visible viewport, the EditText
-        // jumps there. Force the editor back to the top *after* both have
-        // settled — the delay outlasts the IME animation on most devices.
-        editText.postDelayed({
-            editText.setSelection(0)
-            editText.scrollTo(0, 0)
-            editorScroll.scrollTo(0, 0)
-        }, 250L)
+    // Bridge from FullScreenTextDialog's Save action to the SAF launcher
+    // registered above. Stash text, kick off the document picker.
+    private fun launchSaveText(suggestedName: String, content: String) {
+        pendingTextToSave = content
+        saveTextLauncher.launch(suggestedName)
     }
-
-    private fun showResult(title: String, address: String, content: String) {
-        binding.resultTitle.text = title
-        binding.resultAddress.text = address
-        binding.resultContent.text = content
-        // Reset all result card state
-        binding.resultAddress.setTextColor(0xFF64b5f6.toInt()) // accent_blue
-        binding.copyAddressBtn.visibility = View.VISIBLE
-        binding.shareButton.visibility = View.VISIBLE
-        binding.resultContent.visibility = View.VISIBLE
-        // Show the double-tap hint only when there's actual text to expand.
-        // Binary results call showResult with mime/size strings that aren't
-        // worth fullscreen-viewing, so hide the hint there too.
-        binding.resultExpandHint.visibility = if (content.isNotBlank()) View.VISIBLE else View.GONE
-        binding.resultImage.visibility = View.GONE
-        binding.resultImage.setImageBitmap(null)
-        // Reset copy content button in case it was replaced by Save
-        binding.copyContentBtn.text = "Copy Content"
-        binding.copyContentBtn.setOnClickListener {
-            copyToClipboard(binding.resultContent.text.toString(), "Content")
-        }
-        animateResultCard()
-    }
-
     private fun showStatus(message: String, isError: Boolean = false) {
         binding.statusMessage.text = message
         binding.statusMessage.setTextColor(
