@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Brand-spec [/] mark for the etchit launcher icon foreground.
+    Pair-matched with fetch>it's [>] icon: identical scale, identical
+    coord system, identical bounding box — only the centre glyph differs.
+
+    Scale 2x from the canonical brand viewBox (32x16) into the
+    adaptive-icon viewport (108x108):
+        x' = x*2 + 22    y' = y*2 + 38
+
+    Mark bounding box: (30..78, 42..66). Max distance from centre ~27
+    — safely inside any launcher mask's crop circle.
+
+    Filled paths. Copper #c9732b on the ink #0a0a0a background supplied
+    by the adaptive-icon XML.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#c9732b"
+        android:pathData="
+            M 30 42 L 42 42 L 42 46 L 34 46 L 34 62 L 42 62 L 42 66 L 30 66 Z
+            M 66 42 L 78 42 L 78 66 L 66 66 L 66 62 L 74 62 L 74 46 L 66 46 Z
+            M 46 66 L 52 66 L 62 42 L 56 42 Z" />
+
+</vector>
