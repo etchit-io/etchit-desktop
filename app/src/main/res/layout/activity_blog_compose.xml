@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    BlogComposeActivity — two states sharing a root FrameLayout:
+      composeRoot  — title + body editors + Publish
+      resultRoot   — published-address result card with QR + share
+
+    Toggled via visibility from BlogComposeActivity. Background is the
+    same ink #0a0a0a as MainActivity so the transition feels seamless.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0a0a0a"
+    android:fitsSystemWindows="true">
+
+    <!-- ─── compose state ─────────────────────────────────────────── -->
+    <LinearLayout
+        android:id="@+id/composeRoot"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- Top bar: back + label -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp">
+
+            <ImageButton
+                android:id="@+id/composeBackBtn"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/blog_done"
+                android:padding="10dp"
+                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:tint="#f5f2eb" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.04"
+                android:text="@string/blog_compose_title"
+                android:textColor="#8a8a8a"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- Title + body inputs (scrollable) -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="22dp"
+                android:paddingTop="12dp"
+                android:paddingBottom="120dp">
+
+                <!-- Title — serif italic; the spec wants Instrument Serif feel.
+                     System serif italic is close enough for v1. -->
+                <EditText
+                    android:id="@+id/blogTitleInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@null"
+                    android:fontFamily="serif"
+                    android:hint="@string/blog_title_hint"
+                    android:imeOptions="actionNext"
+                    android:inputType="textCapSentences|textAutoCorrect"
+                    android:maxLength="120"
+                    android:maxLines="3"
+                    android:paddingVertical="8dp"
+                    android:textColor="#f5f2eb"
+                    android:textColorHint="#8a4e1d"
+                    android:textSize="34sp"
+                    android:textStyle="italic" />
+
+                <View
+                    android:layout_width="40dp"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="14dp"
+                    android:layout_marginBottom="14dp"
+                    android:background="#c9732b" />
+
+                <!-- Body — plain mono. No syntax highlighting. -->
+                <EditText
+                    android:id="@+id/blogBodyInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@null"
+                    android:fontFamily="monospace"
+                    android:gravity="top|start"
+                    android:hint="@string/blog_body_hint"
+                    android:inputType="textMultiLine|textCapSentences|textAutoCorrect|textLongMessage"
+                    android:lineSpacingMultiplier="1.45"
+                    android:minLines="10"
+                    android:textColor="#f5f2eb"
+                    android:textColorHint="#5a5a5a"
+                    android:textSize="15sp" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- Bottom action bar: status line + Publish -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#0a0a0a"
+            android:gravity="center_vertical"
+            android:orientation="vertical"
+            android:paddingHorizontal="22dp"
+            android:paddingVertical="14dp">
+
+            <TextView
+                android:id="@+id/composeStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:textColor="#8a8a8a"
+                android:textSize="12sp"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/blogPublishBtn"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:enabled="false"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.04"
+                android:text="@string/blog_publish"
+                android:textAllCaps="false"
+                android:textColor="#0a0a0a"
+                android:textSize="15sp"
+                app:backgroundTint="#c9732b"
+                app:cornerRadius="26dp"
+                xmlns:app="http://schemas.android.com/apk/res-auto" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ─── result state ──────────────────────────────────────────── -->
+    <ScrollView
+        android:id="@+id/resultRoot"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="22dp"
+            android:paddingTop="36dp"
+            android:paddingBottom="40dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.04"
+                android:text="@string/blog_published"
+                android:textColor="#9ece6a"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/resultTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:fontFamily="serif"
+                android:textColor="#f5f2eb"
+                android:textSize="26sp"
+                android:textStyle="italic" />
+
+            <TextView
+                android:id="@+id/resultAddress"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="#141414"
+                android:fontFamily="monospace"
+                android:padding="12dp"
+                android:textColor="#c9732b"
+                android:textIsSelectable="true"
+                android:textSize="11sp" />
+
+            <!-- Inline QR card. The activity wires its bitmap. -->
+            <ImageView
+                android:id="@+id/resultQr"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:adjustViewBounds="true"
+                android:background="#ffffff"
+                android:contentDescription="@string/blog_share_qr" />
+
+            <!-- Action buttons -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/resultShareBtn"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="22dp"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.04"
+                android:text="@string/blog_share_qr"
+                android:textAllCaps="false"
+                android:textColor="#0a0a0a"
+                android:textSize="15sp"
+                app:backgroundTint="#c9732b"
+                app:cornerRadius="26dp"
+                xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/resultCopyBtn"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="10dp"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.04"
+                android:text="@string/blog_copy_address"
+                android:textAllCaps="false"
+                android:textColor="#f5f2eb"
+                android:textSize="14sp"
+                app:cornerRadius="24dp"
+                app:strokeColor="#c9732b"
+                xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/resultViewBtn"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.04"
+                android:text="@string/blog_view_post"
+                android:textAllCaps="false"
+                android:textColor="#8a8a8a"
+                android:textSize="13sp" />
+
+            <!-- Spacer pushes finish buttons toward the bottom -->
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="20dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/resultNewBtn"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:fontFamily="monospace"
+                    android:letterSpacing="0.04"
+                    android:text="@string/blog_new_post"
+                    android:textAllCaps="false"
+                    android:textColor="#c9732b"
+                    android:textSize="14sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/resultDoneBtn"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:fontFamily="monospace"
+                    android:letterSpacing="0.04"
+                    android:text="@string/blog_done"
+                    android:textAllCaps="false"
+                    android:textColor="#8a8a8a"
+                    android:textSize="14sp" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>

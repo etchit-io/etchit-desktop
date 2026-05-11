@@ -388,6 +388,10 @@ class MainActivity : AppCompatActivity() {
             hapticTick()
             createPaste()
         }
+        binding.newBlogPostButton.setOnClickListener {
+            hapticTick()
+            startActivity(Intent(this, BlogComposeActivity::class.java))
+        }
         binding.retrieveButton.setOnClickListener {
             hapticTick()
             retrievePaste()
@@ -588,6 +592,9 @@ class MainActivity : AppCompatActivity() {
                 nativeClient = withContext(Dispatchers.IO) {
                     withTimeout(45_000) { Client.connect(peers) }
                 }
+                // Publish the live FFI client so other activities (e.g. the
+                // blog composer) can reuse this single P2P session.
+                (application as EtchitApplication).nativeClient = nativeClient
                 Log.i("ant-paste", "Client.connect() returned in ${System.currentTimeMillis() - t0}ms")
 
                 // Warm-up: wait until peer count has been ≥10 for at least

@@ -21,8 +21,8 @@ android {
         applicationId = "io.etchit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "0.2.5"
+        versionCode = 12
+        versionName = "0.2.6"
 
         buildConfigField("String", "REOWN_PROJECT_ID", "\"$reownProjectId\"")
         buildConfigField("long", "CHAIN_ID", "42161L")
@@ -102,6 +102,9 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.14.0@aar")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.biometric:biometric:1.1.0")
+    // QR generation for the blog "share post" flow. Mirrors fetch>it's
+    // QrShare — see ui/QrShare.kt for the brand-styled card layout.
+    implementation("com.google.zxing:core:3.5.3")
 
     // Reown AppKit (WalletConnect v2). Firebase + Play Services are
     // excluded — Reown pulls them in for FCM-based push delivery, which
