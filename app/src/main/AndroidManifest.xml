@@ -80,10 +80,30 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".BlogComposeActivity"
+            android:exported="false"
+            android:label="@string/blog_compose_title"
+            android:parentActivityName=".MainActivity"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".KeepAliveService"
             android:foregroundServiceType="dataSync"
             android:exported="false"
             android:stopWithTask="false" />
+
+        <!-- Shares blog-post QR-card PNGs out via the system share sheet.
+             Cache-only (qr/ subdir under cacheDir); the default
+             grantUriPermissions=true covers Intent.ACTION_SEND. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

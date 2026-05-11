@@ -1,4 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">etchit</string>
+
+    <!-- Blog composer (BlogComposeActivity / activity_blog_compose.xml) -->
+    <string name="blog_compose_title">new post</string>
+    <string name="blog_title_hint">title</string>
+    <string name="blog_body_hint">write your post…</string>
+    <string name="blog_publish">Publish</string>
+    <string name="blog_publishing">Publishing to Autonomi…</string>
+    <string name="blog_published">Published</string>
+    <string name="blog_copy_address">Copy address</string>
+    <string name="blog_share_qr">Share QR</string>
+    <string name="blog_view_post">View</string>
+    <string name="blog_new_post">New post</string>
+    <string name="blog_done">Done</string>
+
+    <!-- Share-sheet chooser caption when the user taps Share QR. -->
+    <string name="share_qr_title">Share blog post QR</string>
+
+    <!-- Surfaced on the main screen as the entry to BlogComposeActivity. -->
+    <string name="main_new_blog_post">New blog post</string>
 </resources>

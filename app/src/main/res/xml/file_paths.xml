@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    FileProvider paths for ${applicationId}.fileprovider.
+    Used by ui/QrShare.kt to share the branded blog-post QR card image
+    via the Android share sheet.
+-->
+<paths>
+    <cache-path name="qr" path="qr/" />
+</paths>

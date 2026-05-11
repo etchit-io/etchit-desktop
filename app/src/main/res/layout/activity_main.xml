@@ -252,6 +252,21 @@
                     android:stateListAnimator="@null"
                     android:enabled="false"
                     android:layout_marginBottom="8dp" />
+
+                <!-- Blog composer entry — dedicated mode for the "write
+                     a post → publish → share QR" flow that pairs with
+                     fetch>it's reader. -->
+                <Button
+                    android:id="@+id/newBlogPostButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:background="@android:color/transparent"
+                    android:fontFamily="monospace"
+                    android:letterSpacing="0.04"
+                    android:text="@string/main_new_blog_post"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_muted"
+                    android:textSize="13sp" />
             </LinearLayout>
 
             <!-- Loading overlay — outside createSection so it can show independently -->

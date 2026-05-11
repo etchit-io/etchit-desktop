@@ -10,6 +10,7 @@ import com.reown.android.CoreClient
 import com.reown.appkit.client.AppKit
 import com.reown.appkit.client.Modal
 import com.reown.appkit.presets.AppKitChainsPresets
+import uniffi.ant_ffi.Client
 import uniffi.ant_ffi.setupLogger
 
 /**
@@ -30,6 +31,15 @@ class EtchitApplication : Application() {
         private set
 
     val walletSigner: WalletSigner = WalletSigner()
+
+    /**
+     * Shared FFI client. MainActivity owns the connect-on-launch flow and
+     * publishes the live client here so other activities (e.g. the blog
+     * composer) can reuse it without bringing up a second P2P session.
+     * Null until MainActivity finishes its `Client.connect(...)` handshake.
+     */
+    @Volatile
+    var nativeClient: Client? = null
 
     override fun onCreate() {
         super.onCreate()
