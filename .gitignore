@@ -27,3 +27,12 @@ __pycache__/
 *.pyc
 # Reference clones of upstream Autonomi sources (read-only; refresh as needed)
 /withAutonomi/
+
+# etchit-desktop (Tauri 2)
+**/node_modules/
+**/target/
+apps/etchit-desktop/dist/
+apps/etchit-desktop/src-tauri/gen/
+
+# Closed planning / drafts (never pushed)
+private/

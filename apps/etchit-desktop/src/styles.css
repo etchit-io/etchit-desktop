@@ -1,0 +1,498 @@
+/* ── Theme tokens ──────────────────────────────────────────────────── */
+
+body[data-theme="dark"] {
+  --bg: #1a1814;
+  --bg-elev: #221f1a;
+  --fg: #f5f1ea;
+  --ash: #8a857d;
+  --line: #2c2925;
+  --copper: #b87333;
+  --copper-bright: #d18840;
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+body[data-theme="dim"] {
+  --bg: #2d2823;
+  --bg-elev: #36302a;
+  --fg: #efeae0;
+  --ash: #a39d93;
+  --line: #443d35;
+  --copper: #b87333;
+  --copper-bright: #d18840;
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
+
+body[data-theme="light"] {
+  --bg: #f5f1ea;
+  --bg-elev: #faf7f2;
+  --fg: #1a1814;
+  --ash: #4a4640;
+  --line: #e3ddd2;
+  --copper: #b87333;
+  --copper-bright: #c9863a;
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+  color-scheme: light;
+}
+
+/* ── Reset / base ──────────────────────────────────────────────────── */
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  transition: background 180ms ease, color 180ms ease;
+}
+
+a {
+  color: var(--copper);
+  text-decoration: none;
+}
+a:hover { color: var(--copper-bright); }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+/* ── Top bar: wordmark + tabs ──────────────────────────────────────── */
+
+#bar {
+  display: flex;
+  align-items: stretch;
+  gap: 1.5rem;
+  padding: 0 1.25rem;
+  height: 56px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+#mark {
+  align-self: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  user-select: none;
+}
+#mark span {
+  color: var(--copper);
+  margin: 0 0.05em;
+}
+
+#tab-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  flex: 1;
+}
+
+.tab-bar-item {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--ash);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 0 1rem;
+  height: 100%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: color 140ms ease, border-color 140ms ease;
+}
+.tab-bar-item:hover { color: var(--fg); }
+.tab-bar-item.is-active {
+  color: var(--fg);
+  border-bottom-color: var(--copper);
+}
+
+/* ── Stage ──────────────────────────────────────────────────────────── */
+
+#stage {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.tab-pane {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 2.5rem 3rem;
+}
+.tab-pane[hidden] { display: none; }
+
+/* ── Placeholder card ──────────────────────────────────────────────── */
+
+.tab-placeholder {
+  max-width: 560px;
+  margin: 2rem auto 0;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+.tab-placeholder h1 {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+}
+.tab-lede {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--ash);
+}
+.tab-tag {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--copper);
+  border: 1px solid var(--copper);
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+}
+
+/* ── Settings tab ──────────────────────────────────────────────────── */
+
+.settings-content {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.settings-header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.settings-lede {
+  margin: 0;
+  color: var(--ash);
+  font-size: 0.9rem;
+}
+
+.settings-section {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+}
+.settings-section h2 {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ash);
+}
+.settings-desc {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  color: var(--fg);
+  line-height: 1.55;
+}
+.settings-desc:last-child { margin-bottom: 0; }
+.settings-desc-muted { color: var(--ash); }
+
+.settings-theme-options {
+  display: grid;
+  gap: 0.5rem;
+}
+.settings-theme-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--bg);
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.settings-theme-option:hover { border-color: var(--copper); }
+.settings-theme-option:has(input:checked) {
+  border-color: var(--copper);
+  background: color-mix(in srgb, var(--copper) 8%, var(--bg));
+}
+.settings-theme-option input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ash);
+  background: transparent;
+  margin: 3px 0 0;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+.settings-theme-option input[type="radio"]:checked {
+  border-color: var(--copper);
+}
+.settings-theme-option input[type="radio"]:checked::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  background: var(--copper);
+  border-radius: 50%;
+}
+.settings-theme-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-theme-label {
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: var(--fg);
+}
+.settings-theme-desc {
+  font-size: 0.8rem;
+  color: var(--ash);
+}
+
+/* ── Etch tab ─────────────────────────────────────────────────────── */
+
+.etch-tab {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.etch-header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.etch-lede {
+  margin: 0;
+  color: var(--ash);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.etch-modes {
+  display: inline-flex;
+  align-self: flex-start;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 3px;
+}
+.etch-mode {
+  background: transparent;
+  border: none;
+  color: var(--ash);
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 1rem;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 140ms ease, background 140ms ease;
+}
+.etch-mode:hover { color: var(--fg); }
+.etch-mode.is-active {
+  color: var(--fg);
+  background: var(--bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.etch-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.etch-form[hidden] { display: none; }
+
+.etch-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ash);
+}
+.etch-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.8rem;
+}
+
+.etch-input,
+.etch-textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.95rem;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  outline: none;
+  transition: border-color 120ms ease;
+}
+.etch-textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  min-height: 12rem;
+}
+.etch-input:focus,
+.etch-textarea:focus { border-color: var(--copper); }
+.etch-input::placeholder,
+.etch-textarea::placeholder { color: var(--ash); }
+
+.etch-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 2rem;
+  background: var(--bg-elev);
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  text-align: center;
+}
+.etch-drop-prompt {
+  margin: 0;
+  color: var(--ash);
+  font-size: 0.92rem;
+}
+.etch-pick {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--copper);
+  border-radius: 6px;
+  padding: 0.5rem 1.1rem;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+.etch-pick:hover { background: var(--copper); color: var(--bg); }
+.etch-picked {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--fg);
+  word-break: break-all;
+}
+.etch-picked[hidden] { display: none; }
+
+.etch-submit {
+  align-self: flex-end;
+  background: var(--copper);
+  color: var(--bone);
+  border: 1px solid var(--copper);
+  border-radius: 8px;
+  padding: 0.65rem 1.5rem;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+body[data-theme="light"] .etch-submit { color: #fff; }
+.etch-submit:hover:not(:disabled) {
+  background: var(--copper-bright);
+  border-color: var(--copper-bright);
+}
+.etch-submit:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.etch-result {
+  background: var(--bg-elev);
+  border: 1px solid var(--copper);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.etch-result[hidden] { display: none; }
+.etch-result-headline {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--copper);
+}
+.etch-result-addr {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  word-break: break-all;
+  user-select: text;
+}
+.etch-result-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+.etch-result-actions button {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+.etch-result-actions button:hover:not(:disabled) {
+  border-color: var(--copper);
+  color: var(--copper);
+}
+.etch-result-actions button:disabled { opacity: 0.6; cursor: default; }
+
+.etch-error {
+  background: var(--bg-elev);
+  border: 1px solid #c44;
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--fg);
+  white-space: pre-wrap;
+}
+.etch-error[hidden] { display: none; }
