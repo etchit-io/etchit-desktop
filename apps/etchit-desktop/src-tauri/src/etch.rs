@@ -1,61 +1,97 @@
-//! Etch tab commands — shell out to `ant file upload --public <path>` and
-//! return the resulting 64-hex address. Two entry points:
+//! Etch tab — turn user input into an `autonomi://` address.
 //!
-//! - [`etch_file`]: caller supplies the absolute path. Uploads as-is, no
-//!   transformation. For arbitrary user-picked files (images, video, EPUB,
-//!   PDF, anything).
-//! - [`etch_text`]: caller supplies title + body. We wrap them in the
-//!   etch/it envelope JSON, write to a unique temp file, upload that, then
-//!   delete the temp. fetch>it's `EtchitEnvelopeHandler` recognises the
-//!   shape on the read side. The envelope contains no literal etch/it
-//!   identifier — uploads stay neutral per `docs/upload-neutrality.md`.
+//! V0 wires the Tauri backend straight into `ant-ffi`: the wallet key
+//! lives in the OS keychain, `Client::connect_with_wallet` brings up a
+//! mainnet connection on Arbitrum One, then [`Client::data_put_public`]
+//! (for text envelopes) or [`Client::file_upload_public`] (for files)
+//! returns the 64-hex address.
+//!
+//! The connected client is cached in [`EtchState`] keyed by SHA256 of
+//! the wallet key, so the bootstrap warmup (~10 s) is paid once per
+//! session. Rotating the key in Advanced invalidates the cache because
+//! the fingerprint changes.
+//!
+//! Envelope shape matches Android (`PasteUtils.kt`) so fetch>it's
+//! `EtchitEnvelopeHandler` recognises text etches. No etch/it strings
+//! ever land in the uploaded bytes — see `docs/upload-neutrality.md`.
 
-use std::process::Stdio;
+use std::sync::Arc;
 
-use tokio::process::Command;
+use ant_ffi::Client;
+use sha2::{Digest, Sha256};
+use tauri::State;
+use tokio::sync::Mutex;
 
-/// Upload a file at `path` via the `ant` CLI and return the 64-hex
-/// address. The shell-out is intentional for V0 — see `docs/desktop-roadmap.md`.
-#[tauri::command]
-pub async fn etch_file(path: String) -> Result<String, String> {
-    let output = Command::new("ant")
-        .args(["file", "upload", "--public", &path])
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .map_err(|e| format!("failed to launch `ant`: {e}. Is the ant CLI installed and on $PATH?"))?;
+use crate::secrets;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+const RPC_URL: &str = "https://arb1.arbitrum.io/rpc";
+const ANT_TOKEN_ADDRESS: &str = "0xa78d8321B20c4Ef90eCd72f2588AA985A4BDb684";
+const VAULT_ADDRESS: &str = "0x9A3EcAc693b699Fc0B2B6A50B5549e50c2320A26";
+const PAYMENT_MODE: &str = "auto";
 
-    if !output.status.success() {
-        return Err(format!(
-            "ant exited with {}:\n{stderr}{stdout}",
-            output.status,
-        ));
-    }
+const NO_KEY_HINT: &str =
+    "no wallet key stored. paste a hex private key in Settings → Advanced first.";
 
-    parse_address(&format!("{stdout}\n{stderr}")).ok_or_else(|| {
-        format!("no 64-hex address found in ant output.\nstdout:\n{stdout}\nstderr:\n{stderr}")
-    })
+/// Long-lived `Client` cache. The `Default` impl gives us an empty
+/// cache; the first etch populates it.
+#[derive(Default)]
+pub struct EtchState {
+    cached: Mutex<Option<(Arc<Client>, [u8; 32])>>,
 }
 
-/// Wrap `title` + `body` in the etch/it envelope JSON and upload via
-/// [`etch_file`]. The temp file is removed regardless of upload outcome.
+/// Wrap `title` + `body` in the etch/it envelope JSON and upload as
+/// public data. Returns the 64-hex address.
 #[tauri::command]
-pub async fn etch_text(title: String, body: String) -> Result<String, String> {
+pub async fn etch_text(
+    state: State<'_, EtchState>,
+    title: String,
+    body: String,
+) -> Result<String, String> {
     let envelope = build_envelope(&title, &body);
-    let temp = tempfile::Builder::new()
-        .prefix("etchit-")
-        .suffix(".txt")
-        .tempfile()
-        .map_err(|e| format!("couldn't create temp file: {e}"))?;
-    let path = temp.path().to_path_buf();
-    tokio::fs::write(&path, envelope.as_bytes())
+    let client = get_or_build_client(&state).await?;
+    let result = client
+        .data_put_public(envelope.into_bytes(), PAYMENT_MODE.into())
         .await
-        .map_err(|e| format!("temp write failed: {e}"))?;
-    etch_file(path.to_string_lossy().into_owned()).await
-    // `temp` drops here; the file is unlinked.
+        .map_err(|e| format!("upload failed: {e}"))?;
+    Ok(result.address)
+}
+
+/// Upload a file as public data. Returns the 64-hex address.
+#[tauri::command]
+pub async fn etch_file(state: State<'_, EtchState>, path: String) -> Result<String, String> {
+    let client = get_or_build_client(&state).await?;
+    let result = client
+        .file_upload_public(path, PAYMENT_MODE.into())
+        .await
+        .map_err(|e| format!("upload failed: {e}"))?;
+    Ok(result.address)
+}
+
+async fn get_or_build_client(state: &EtchState) -> Result<Arc<Client>, String> {
+    let key = secrets::get_stored_key().ok_or_else(|| NO_KEY_HINT.to_string())?;
+    let fp = key_fingerprint(&key);
+    let mut guard = state.cached.lock().await;
+    if let Some((client, cached_fp)) = guard.as_ref() {
+        if cached_fp == &fp {
+            return Ok(client.clone());
+        }
+    }
+    // Either nothing cached or the user rotated the key — build fresh.
+    let client = Client::connect_with_wallet(
+        Vec::new(),
+        key,
+        RPC_URL.to_string(),
+        ANT_TOKEN_ADDRESS.to_string(),
+        VAULT_ADDRESS.to_string(),
+    )
+    .await
+    .map_err(|e| format!("client init failed: {e}"))?;
+    *guard = Some((client.clone(), fp));
+    Ok(client)
+}
+
+fn key_fingerprint(key: &str) -> [u8; 32] {
+    Sha256::digest(key.as_bytes()).into()
 }
 
 fn build_envelope(title: &str, body: &str) -> String {
@@ -64,57 +100,25 @@ fn build_envelope(title: &str, body: &str) -> String {
     format!(r#"{{"v":1,"meta":{{"title":{t},"lang":""}},"content":{b}}}"#)
 }
 
-fn parse_address(s: &str) -> Option<String> {
-    for line in s.lines() {
-        for raw in line.split(|c: char| !c.is_ascii_alphanumeric()) {
-            if raw.len() == 64 && raw.chars().all(|c| c.is_ascii_hexdigit()) {
-                return Some(raw.to_ascii_lowercase());
-            }
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
-    const REAL: &str = "f4b86ae19e4b1e625ea2af9b15015340443988407f0ae56d28a1050e64ece167";
+    const KEY_A: &str = "f4b86ae19e4b1e625ea2af9b15015340443988407f0ae56d28a1050e64ece167";
+    const KEY_B: &str = "f4b86ae19e4b1e625ea2af9b15015340443988407f0ae56d28a1050e64ece168";
 
     #[test]
-    fn parse_address_finds_64_hex() {
-        let out = format!("connecting\nuploaded to: {REAL}\nok\n");
-        assert_eq!(parse_address(&out).as_deref(), Some(REAL));
-    }
-
-    #[test]
-    fn parse_address_returns_none_when_absent() {
-        assert!(parse_address("just some words 12345 done").is_none());
-    }
-
-    #[test]
-    fn parse_address_lowercases_match() {
-        let out = REAL.to_uppercase();
-        assert_eq!(parse_address(&out).as_deref(), Some(REAL));
-    }
-
-    #[test]
-    fn parse_address_skips_non_64_hex_runs() {
-        let short = "a".repeat(63);
-        let mixed = "abc".repeat(40);
-        let out = format!("{short} {mixed} {REAL}");
-        assert_eq!(parse_address(&out).as_deref(), Some(REAL));
-    }
-
-    #[test]
-    fn build_envelope_matches_android_shape() {
+    fn envelope_matches_android_shape() {
         let s = build_envelope("Hello", "world");
-        assert_eq!(s, r#"{"v":1,"meta":{"title":"Hello","lang":""},"content":"world"}"#);
+        assert_eq!(
+            s,
+            r#"{"v":1,"meta":{"title":"Hello","lang":""},"content":"world"}"#
+        );
     }
 
     #[test]
-    fn build_envelope_escapes_specials() {
+    fn envelope_escapes_specials() {
         let s = build_envelope("a\"b", "c\\d\ne");
         let parsed: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(parsed["meta"]["title"], "a\"b");
@@ -122,7 +126,7 @@ mod tests {
     }
 
     #[test]
-    fn build_envelope_trims_title_only() {
+    fn envelope_trims_title_only() {
         let s = build_envelope("  trim  ", "  keep  ");
         let parsed: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(parsed["meta"]["title"], "trim");
@@ -130,11 +134,24 @@ mod tests {
     }
 
     #[test]
-    fn build_envelope_carries_no_brand_string() {
+    fn envelope_carries_no_brand_string() {
         let s = build_envelope("anything", "any body");
         let lower = s.to_lowercase();
         for forbidden in ["etchit", "etch/it", "etch>it", "etchit.io"] {
-            assert!(!lower.contains(forbidden), "envelope must not contain {forbidden}");
+            assert!(
+                !lower.contains(forbidden),
+                "envelope must not contain {forbidden}"
+            );
         }
+    }
+
+    #[test]
+    fn fingerprint_is_deterministic() {
+        assert_eq!(key_fingerprint(KEY_A), key_fingerprint(KEY_A));
+    }
+
+    #[test]
+    fn fingerprint_differs_by_key() {
+        assert_ne!(key_fingerprint(KEY_A), key_fingerprint(KEY_B));
     }
 }

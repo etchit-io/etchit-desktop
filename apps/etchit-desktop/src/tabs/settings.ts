@@ -1,3 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
+
+import { normalizeSecretKey } from "../etch/secretKey";
 import { applyTheme, loadTheme, type Theme } from "../theme/theme";
 
 interface ThemeOption {
@@ -31,6 +34,7 @@ export function mountSettings(host: HTMLElement): void {
         <h1>Settings</h1>
         <p class="settings-lede">Premium defaults out of the box; everything optional below.</p>
       </header>
+
       <section class="settings-section">
         <h2>Appearance</h2>
         <p class="settings-desc">
@@ -38,6 +42,39 @@ export function mountSettings(host: HTMLElement): void {
         </p>
         <div class="settings-theme-options" role="radiogroup" aria-label="Theme"></div>
       </section>
+
+      <section class="settings-section">
+        <h2>Advanced &mdash; wallet key</h2>
+        <p class="settings-desc">
+          For etching without WalletConnect. Paste a hex private key and
+          etch/it will use it to pay for uploads, storing it only in
+          your operating system&rsquo;s keychain &mdash; never on disk in
+          plaintext.
+        </p>
+        <div class="settings-warn">
+          <p class="settings-warn-title">Use a dedicated upload wallet.</p>
+          <p class="settings-warn-body">
+            Fund it small, treat it as hot. Don&rsquo;t paste a wallet that
+            holds anything you&rsquo;d be upset to lose.
+          </p>
+        </div>
+        <label class="settings-key-label" for="settings-key-input">Private key</label>
+        <input
+          id="settings-key-input"
+          type="password"
+          class="settings-key-input"
+          placeholder="64-hex (with or without 0x prefix)"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+        />
+        <div class="settings-key-actions">
+          <button type="button" class="settings-key-store" disabled>Store key</button>
+          <button type="button" class="settings-key-clear" hidden>Clear stored key</button>
+        </div>
+        <p class="settings-key-status" role="status" aria-live="polite">checking&hellip;</p>
+      </section>
+
       <section class="settings-section">
         <h2>About</h2>
         <p class="settings-desc">
@@ -55,6 +92,11 @@ export function mountSettings(host: HTMLElement): void {
     </div>
   `;
 
+  mountAppearance(host);
+  mountAdvanced(host);
+}
+
+function mountAppearance(host: HTMLElement): void {
   const optionsHost = host.querySelector(".settings-theme-options") as HTMLElement;
   const current = loadTheme();
   for (const opt of THEME_OPTIONS) {
@@ -74,4 +116,75 @@ export function mountSettings(host: HTMLElement): void {
       if (input.checked) applyTheme(opt.id);
     });
   }
+}
+
+function mountAdvanced(host: HTMLElement): void {
+  const input = host.querySelector(".settings-key-input") as HTMLInputElement;
+  const storeBtn = host.querySelector(".settings-key-store") as HTMLButtonElement;
+  const clearBtn = host.querySelector(".settings-key-clear") as HTMLButtonElement;
+  const status = host.querySelector(".settings-key-status") as HTMLParagraphElement;
+
+  function refreshStoreEnabled(): void {
+    storeBtn.disabled = normalizeSecretKey(input.value) === null;
+  }
+
+  function setStatusStored(): void {
+    status.textContent = "Key stored. Uploads will pay from this wallet.";
+    status.dataset.tone = "ok";
+    clearBtn.hidden = false;
+  }
+
+  function setStatusEmpty(): void {
+    status.textContent = "No key stored. Add one to enable etching.";
+    status.dataset.tone = "muted";
+    clearBtn.hidden = true;
+  }
+
+  function setStatusError(msg: string): void {
+    status.textContent = msg;
+    status.dataset.tone = "error";
+  }
+
+  void invoke<boolean>("has_secret_key").then(
+    (present) => (present ? setStatusStored() : setStatusEmpty()),
+    (e) => setStatusError(String(e)),
+  );
+
+  input.addEventListener("input", refreshStoreEnabled);
+
+  storeBtn.addEventListener("click", () => {
+    const value = input.value;
+    storeBtn.disabled = true;
+    storeBtn.textContent = "Storing…";
+    void invoke<void>("store_secret_key", { key: value }).then(
+      () => {
+        input.value = "";
+        storeBtn.textContent = "Store key";
+        refreshStoreEnabled();
+        setStatusStored();
+      },
+      (e) => {
+        storeBtn.textContent = "Store key";
+        refreshStoreEnabled();
+        setStatusError(String(e));
+      },
+    );
+  });
+
+  clearBtn.addEventListener("click", () => {
+    clearBtn.disabled = true;
+    clearBtn.textContent = "Clearing…";
+    void invoke<void>("clear_secret_key").then(
+      () => {
+        clearBtn.textContent = "Clear stored key";
+        clearBtn.disabled = false;
+        setStatusEmpty();
+      },
+      (e) => {
+        clearBtn.textContent = "Clear stored key";
+        clearBtn.disabled = false;
+        setStatusError(String(e));
+      },
+    );
+  });
 }

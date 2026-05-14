@@ -38,20 +38,43 @@ tests in the same commit (the rule from CLAUDE.md / feedback memory).
 
 | # | Tab | What it does | Wallet needed? |
 |---|---|---|---|
-| 1 | **Etch** ✓ | Paste text or drop a file → returns an `autonomi://` address. The smallest possible upload UI. Shipped V0: shell-out to `ant file upload --public`, neutral envelope for text, native file picker for files, result panel with Copy + Open-in-fetch>it. 8 Rust tests + 11 TS tests covering envelope shape, address parsing, and neutrality. | V0 uses `ant file upload --public` via shell-out (the user already has `ant` at `~/.local/bin/ant`); native wallet comes later |
-| 2 | **Blogger** | Title + body composer → publishes a self-contained HTML page following `docs/upload-neutrality.md` (no etch/it strings in the bytes). Parallel of `BlogHtml.kt` on Android | Same as Etch — shell-out V0 |
+| 1 | **Etch** ✓ | Paste text or drop a file → returns an `autonomi://` address. The smallest possible upload UI. V0: native via `ant-ffi` path dep (same crate Android binds to), wallet key from OS keychain, `data_put_public` for text and `file_upload_public` for files. Neutral envelope, native file picker, result panel with Copy + Open-in-fetch>it. Long-lived `Client` cached in Tauri State so subsequent etches skip the ~10 s bootstrap warmup. | V0: paste hex key into Settings → Advanced → OS keychain. V1: WalletConnect Modal Web swaps the paste path for the external-signer flow (`prepare_public_upload` + `finalize_public_upload`, mirroring `EtchSigner.kt`) |
+| 2 | **Blogger** | Title + body composer → publishes a self-contained HTML page following `docs/upload-neutrality.md` (no etch/it strings in the bytes). Parallel of `BlogHtml.kt` on Android | Same backend as Etch — `ant-ffi` direct, key from keychain |
 | 3 | **History** | Local-only log of past etches (address + label + cost + timestamp), persisted in `settings.json`. No network calls; lives off what the upload tabs record at success time | None — local only |
 | 4 | **Wallet** | Status panel: balance, approval budget, connection. WalletConnect Modal Web (browser-style SDK loaded in the Tauri WebView) | This is where wallet becomes native (replaces the shell-out path) |
 | 5 | **Website** | Multi-file site builder. Drop a folder; etchit emits one entry-point address. Desktop-only by design — heavy file handling doesn't fit a phone | Native wallet by this point |
 | 6 | **Settings** | Already functional in V0 (theme picker + about). Expand as other tabs need persistent prefs | None |
+
+## UX principles
+
+etchit's primary audience is *tech-curious people trying something they
+don't fully understand*. The default surface must be idiot-proof — every
+common path usable without docs, every button labelled in plain English,
+no jargon, no preconditions. Power features live behind a clearly
+labelled **Advanced** section in Settings.
+
+| Surface | Stance |
+|---|---|
+| Main UI (Etch, Blogger, History, Wallet, Website tabs) | Always idiot-proof. Should work for a user who's never heard of "private keys" or "data maps" |
+| Settings → Advanced | Paste-key wallet, custom bootstrap peers, payment-mode override, chain/it sync, devnet, anything that requires the user to understand what could go wrong |
+
+**Risk framing for Advanced features.** Vague "at your own risk" is not
+a warning — it tells the user nothing. Where a feature carries risk, the
+copy must be specific. The paste-key Advanced panel says:
+
+> Use a dedicated upload wallet, fund it small, treat it as hot.
+
+Not: "store keys at your own risk." A specific instruction is a real
+warning; a hedged disclaimer is fence-sitting.
 
 ## Locked decisions
 
 | Decision | Why |
 |---|---|
 | Tauri 2, not native (Swift / Win-native) | One codebase covers desktop + iOS + (eventually) Android. Single solo-dev maintainable. See `fetchit/CLAUDE.md` for the matching rationale |
-| `ant file upload --public` shell-out for V0 | Defers wallet integration. `ant` already manages keys / config in `~/.config/autonomi/`. Lets us ship Etch + Blogger weeks before we have to figure out WalletConnect inside a Tauri WebView |
-| WalletConnect Modal Web for V1 native wallet | Browser-shaped SDK, runs inside Tauri's WebView, same code path for iOS later. Reown AppKit on Android is platform-specific — leave that for the Kotlin app until we migrate |
+| Link `ant-ffi` directly (path dep, Rust→Rust) | `ant-ffi` is etchit's own upload crate — the same one Android binds to via UniFFI. Calling from Tauri Rust skips the FFI layer entirely. No third-party `ant` CLI as a runtime dependency. Heavy transitive deps (`ant-node`, `evmlib`, `saorsa-*`) make the first build slow; that's the cost of native |
+| OS keychain for every stored secret | Never `.env` (leaks via commits and home-dir scrapers), never plain `settings.json` (grep-able by any process or backup). `keyring` crate covers macOS Keychain / Windows Credential Manager / Linux libsecret in one API |
+| WalletConnect Modal Web for V1 native wallet | Browser-shaped SDK, runs inside Tauri's WebView, same code path for iOS later. V1 swaps the V0 paste-key path for the external-signer flow (`prepare_public_upload` + `finalize_public_upload`, mirroring `EtchSigner.kt`). Reown AppKit on Android is platform-specific — leave that for the Kotlin app until we migrate |
 | Three themes: dark (default) / dim / light | Brand is dark; offer a softer alternative for users who don't want full dark. Driven by `body[data-theme]` + CSS custom properties; no theme-specific JS branching |
 | Tab state lazily mounted, persistent on switch | `controller.ts` mounts a tab the first time it's visited and leaves it in the DOM (just `hidden`). Switching tabs preserves user state without remount work |
 | One file per tab, one concern per module | Per `feedback-modular-desktop` memory. No monolith files |

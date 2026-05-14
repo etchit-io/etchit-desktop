@@ -1,11 +1,14 @@
 //! Tauri backend for etch/it desktop — companion publisher to fetch>it.
 //!
-//! V0 shells out to the `ant` CLI (`ant file upload --public <path>`) for
-//! every upload. Native wallet integration (WalletConnect Modal Web) lands
-//! when the Wallet tab is implemented; until then, `ant` manages its own
-//! keys + config in `~/.config/autonomi/`.
+//! V0 links `ant-ffi` directly (the same crate Android binds to via
+//! UniFFI). The user pastes a hex wallet key into Settings → Advanced;
+//! it's stored in the OS keychain and consumed by
+//! `Client::connect_with_wallet`. `ant-core` handles approval and
+//! payment internally. WalletConnect Modal Web lands with the Wallet
+//! tab (V1) and swaps in the external-signer flow.
 
 mod etch;
+mod secrets;
 
 /// Hand a freshly-etched `autonomi://<addr>` URL to the OS scheme handler
 /// (fetch>it desktop if installed). We shell out to the platform opener
@@ -27,14 +30,30 @@ fn open_in_fetchit(address: String) -> Result<(), String> {
         .map_err(|e| format!("couldn't launch `{cmd}`: {e}. Is fetch>it desktop installed?"))
 }
 
+/// `ant-core`'s `data_dir()` calls `home_dir().unwrap()` and panics when
+/// HOME is unset (Android does this on launch; sandboxed/container Linux
+/// can hit it too). Set a sensible fallback before any `ant-ffi` call so
+/// the platform-derived data dir resolves to a writable path. No-op when
+/// the env var is already populated, which is the normal desktop case.
+fn ensure_home_env() {
+    if std::env::var_os("HOME").is_none() {
+        std::env::set_var("HOME", std::env::temp_dir());
+    }
+}
+
 /// Run the Tauri app.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    ensure_home_env();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(etch::EtchState::default())
         .invoke_handler(tauri::generate_handler![
             etch::etch_file,
             etch::etch_text,
+            secrets::store_secret_key,
+            secrets::clear_secret_key,
+            secrets::has_secret_key,
             open_in_fetchit,
         ])
         .run(tauri::generate_context!())

@@ -18,8 +18,34 @@ tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["sync", "fs", "process"] }
-tempfile = "3"
+tokio = { version = "1", features = ["sync"] }
+# etchit's own upload crate — same one Android binds to via UniFFI.
+# Pulled as a regular Rust dep so we call it Rust→Rust and skip the FFI layer.
+ant-ffi = { path = "../../../ffi/rust/ant-ffi" }
+# OS-native secret storage (macOS Keychain / Windows Credential Manager /
+# Linux Secret Service over DBus). Wallet keys live here, never on disk.
+# `keyring` ships zero default features — without these flags the crate
+# falls back to a no-op mock backend that quietly drops every write.
+keyring = { version = "3", default-features = false, features = [
+    "apple-native",
+    "windows-native",
+    "linux-native-sync-persistent",
+    "crypto-rust",
+] }
+# Fingerprint the wallet key so we can invalidate the cached Client
+# without keeping the key in two places.
+sha2 = "0.10"
+
+# Transitive pins — `ant-node = 0.11.1` (pulled in via `ant-ffi`) is
+# source-incompatible with `saorsa-core >= 0.24.3` (added a
+# `transport_source` field to `P2PEvent::Message` that breaks
+# ant-node's pattern match) and `saorsa-transport >= 0.34.2`. The
+# `ffi/rust/Cargo.lock` locks these to the working pair; we mirror
+# that here so etchit-desktop's resolver doesn't pick newer patch
+# versions on a fresh build. Drop these whenever the FFI bumps
+# ant-node to a release built against current saorsa.
+saorsa-core = "=0.24.2"
+saorsa-transport = "=0.34.1"
 
 [lints.rust]
 unsafe_code = "forbid"

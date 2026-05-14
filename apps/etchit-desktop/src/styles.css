@@ -180,16 +180,19 @@ code {
 /* ── Settings tab ──────────────────────────────────────────────────── */
 
 .settings-content {
-  max-width: 640px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+  gap: 1.5rem;
+  max-width: 1400px;
   margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
+  align-items: start;
 }
-
+.settings-header {
+  grid-column: 1 / -1;
+}
 .settings-header h1 {
   margin: 0 0 0.25rem;
-  font-size: 1.5rem;
+  font-size: 1.85rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--fg);
@@ -281,10 +284,106 @@ code {
   color: var(--ash);
 }
 
+/* ── Settings: advanced panel ─────────────────────────────────────── */
+
+.settings-warn {
+  border-left: 3px solid var(--copper);
+  background: color-mix(in srgb, var(--copper) 7%, transparent);
+  padding: 0.6rem 0.9rem;
+  margin: 0 0 0.85rem;
+  border-radius: 0 6px 6px 0;
+}
+.settings-warn-title {
+  margin: 0 0 0.2rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+.settings-warn-body {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--ash);
+  line-height: 1.5;
+}
+
+.settings-key-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ash);
+  margin-top: 0.85rem;
+}
+
+.settings-key-input {
+  display: block;
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  margin: 0.35rem 0 0;
+  outline: none;
+  transition: border-color 120ms ease;
+}
+.settings-key-input:focus { border-color: var(--copper); }
+.settings-key-input::placeholder { color: var(--ash); }
+
+.settings-key-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+  flex-wrap: wrap;
+}
+.settings-key-store,
+.settings-key-clear {
+  font-family: inherit;
+  font-size: 0.88rem;
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.settings-key-store {
+  background: var(--copper);
+  color: #fff;
+  border: 1px solid var(--copper);
+}
+.settings-key-store:hover:not(:disabled) {
+  background: var(--copper-bright);
+  border-color: var(--copper-bright);
+}
+.settings-key-store:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.settings-key-clear {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line);
+}
+.settings-key-clear:hover:not(:disabled) {
+  border-color: var(--copper);
+  color: var(--copper);
+}
+.settings-key-clear[hidden] { display: none; }
+
+.settings-key-status {
+  margin: 0.75rem 0 0;
+  font-size: 0.82rem;
+  color: var(--ash);
+}
+.settings-key-status[data-tone="ok"] { color: var(--copper-bright); }
+.settings-key-status[data-tone="error"] { color: #d6604c; }
+
 /* ── Etch tab ─────────────────────────────────────────────────────── */
 
 .etch-tab {
-  max-width: 720px;
+  max-width: 1400px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -293,7 +392,7 @@ code {
 
 .etch-header h1 {
   margin: 0 0 0.25rem;
-  font-size: 1.5rem;
+  font-size: 1.85rem;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
