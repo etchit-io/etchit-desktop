@@ -27,7 +27,11 @@ use crate::secrets;
 const RPC_URL: &str = "https://arb1.arbitrum.io/rpc";
 const ANT_TOKEN_ADDRESS: &str = "0xa78d8321B20c4Ef90eCd72f2588AA985A4BDb684";
 const VAULT_ADDRESS: &str = "0x9A3EcAc693b699Fc0B2B6A50B5549e50c2320A26";
-const PAYMENT_MODE: &str = "auto";
+
+/// `ant-core`'s payment-mode selector. "auto" picks merkle for batches
+/// of ≥ 2 chunks (cheaper gas) and per-chunk single payments below
+/// that, which matches what `ant-cli` does by default.
+pub(crate) const PAYMENT_MODE: &str = "auto";
 
 const NO_KEY_HINT: &str =
     "no wallet key stored. paste a hex private key in Settings → Advanced first.";
@@ -67,7 +71,7 @@ pub async fn etch_file(state: State<'_, EtchState>, path: String) -> Result<Stri
     Ok(result.address)
 }
 
-async fn get_or_build_client(state: &EtchState) -> Result<Arc<Client>, String> {
+pub(crate) async fn get_or_build_client(state: &EtchState) -> Result<Arc<Client>, String> {
     let key = secrets::get_stored_key().ok_or_else(|| NO_KEY_HINT.to_string())?;
     let fp = key_fingerprint(&key);
     let mut guard = state.cached.lock().await;

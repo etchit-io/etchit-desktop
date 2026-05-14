@@ -56,25 +56,63 @@ recognisably ours in the uploaded bytes, write it down here with the
 reason and the explicit user-visible opt-in. Silence is consent to the
 default: neutral.
 
+## Image metadata — a deliberate split
+
+The composer (Blogger, eventually Website) and the raw uploader
+(Etch's file mode) treat image metadata differently, on purpose.
+
+**Composer: every dropped image is auto-cleaned.**
+`apps/etchit-desktop/src/blog/imageProcessor.ts` runs each image
+through a canvas re-encode: decode → downscale to 1920 px on the long
+side → re-emit as WebP at q=0.85. Canvas only carries pixel data, so
+EXIF / GPS coordinates / camera model / serial / capture timestamp
+*cannot* survive the round trip — the re-encode **is** the strip.
+Side effects: WebP cuts file size 25-40% vs JPEG at the same visible
+quality, and the resize alone usually shaves 90% off phone photos.
+We surface this to the user under every image drop zone, in plain
+language:
+
+> metadata stripped and resized for you — your camera data stays yours.
+
+**Why this is the default**, not an opt-in: most users don't know
+EXIF exists, and the ones who do don't expect a blogging tool to leak
+GPS coordinates from their phone photos. Composing a blog post is an
+authoring act — the user is deciding what to publish, and they aren't
+typing in their location. So we make sure their location doesn't
+ship. The bytes are safe for whistleblowers and for travelers
+equally; the tool stays out of the threat model.
+
+**Etch's file mode: raw passthrough, no transformation.** When a user
+drops a file directly into Etch, the bytes go up unchanged. That's
+the contract for that flow: "publish this file, as-is." If a
+photographer wants to preserve provenance, they upload via Etch. If
+they want a blog post, they use Blogger and accept the auto-clean.
+The split is the user's choice, made visible by which tab they pick.
+
 ## Where this is enforced
 
 - **Android**: `app/src/main/java/com/autonomi/antpaste/BlogHtml.kt`
   emits the blog HTML; `app/src/test/java/com/autonomi/antpaste/BlogHtmlTest.kt`
   asserts the output contains no literal `etchit` / `etch/it` /
   `etchit.io` strings and no `name="generator"` meta.
-- **Desktop (Tauri 2, in development)**: `apps/etchit-desktop/`. The
-  Blogger and Website tabs follow the same rule when implemented;
-  matching tests live alongside each module.
+- **Desktop (Tauri 2)**: HTML emission lives per-template in TypeScript
+  (`apps/etchit-desktop/src/blog/templates/`); each template ships with
+  vitest assertions blocking literal brand strings, `name="generator"`
+  meta, and title/body injection. The Rust backend
+  (`src-tauri/src/blog.rs::etch_html`) is a thin passthrough — it
+  validates the leading `<!DOCTYPE html>` and uploads, never modifying
+  the bytes. Image neutrality is enforced by
+  `src/blog/imageProcessor.ts` (canvas re-encode strips all metadata
+  by construction).
 - **FFI** (`ffi/rust/`) and the underlying `ant-ffi` write raw bytes —
   they don't add anything of their own to the user's content.
 
-## What's not covered (and never will be)
+## What's still not covered
 
-- **Image / video / EPUB / PDF EXIF or XMP metadata that the user
-  brought along.** We never strip or rewrite that — it's the user's
-  responsibility. Stripping it for them risks destroying provenance the
-  user wants preserved. If a user wants metadata-stripped output, they
-  strip it before handing the file to etch/it.
+- **EPUB / PDF / video metadata uploaded via Etch file mode.** Etch
+  is the raw-upload path — by design we never touch the bytes. Users
+  who care about embedded metadata in those formats strip it
+  themselves before handing the file to Etch.
 - **On-chain artifacts** (chainmarks). The chainmark payload is a wire
   format defined by the protocol, not a brand stamp. It carries no
   literal "etchit" string. See `docs/chainmark-format-v1.md`.

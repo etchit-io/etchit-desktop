@@ -595,3 +595,825 @@ body[data-theme="light"] .etch-submit { color: #fff; }
   white-space: pre-wrap;
 }
 .etch-error[hidden] { display: none; }
+
+/* ── Blogger tab ──────────────────────────────────────────────────── */
+/* Two states: a template picker (three big cards) and the composer
+   for the chosen template. The composer canvas mimics the rendered
+   page's font/colour palette so what you type already looks like
+   what'll publish. */
+
+.blog-tab {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Template picker */
+
+.blog-pick-header h1 {
+  margin: 0 0 0.3rem;
+  font-size: 1.85rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.blog-pick-lede {
+  margin: 0 0 1.5rem;
+  color: var(--ash);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  max-width: 64ch;
+}
+
+.blog-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.blog-pick-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: left;
+  padding: 1.1rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+.blog-pick-card:hover {
+  border-color: var(--copper);
+  transform: translateY(-2px);
+}
+
+.blog-pick-preview {
+  height: 160px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.blog-pick-preview > * {
+  background: color-mix(in srgb, var(--fg) 30%, transparent);
+  border-radius: 2px;
+}
+.blog-pick-preview .pp-title { height: 12px; width: 65%; }
+.blog-pick-preview .pp-lede  { height: 6px;  width: 45%; opacity: 0.7; }
+.blog-pick-preview .pp-rule  { height: 2px;  width: 22px; background: var(--copper); margin-top: 2px; border-radius: 1px; }
+.blog-pick-preview .pp-line  { height: 5px;  width: 100%; }
+.blog-pick-preview .pp-line.short { width: 75%; }
+.blog-pick-preview .pp-image { height: 38px; background: color-mix(in srgb, var(--copper) 35%, transparent); }
+.blog-pick-preview .pp-image.small { height: 22px; }
+.blog-pick-preview .pp-pair {
+  display: flex;
+  gap: 6px;
+  background: transparent;
+}
+.blog-pick-preview .pp-img-mini  { width: 35%; min-height: 20px; background: color-mix(in srgb, var(--copper) 35%, transparent); border-radius: 2px; }
+.blog-pick-preview .pp-cap-mini  { flex: 1;   min-height: 20px; background: color-mix(in srgb, var(--fg) 30%, transparent); border-radius: 2px; }
+.blog-pick-preview .pp-title.tall { height: 16px; }
+.blog-pick-preview .pp-byline { height: 4px; width: 30%; opacity: 0.55; }
+.blog-pick-preview .pp-byline.narrow { width: 22%; }
+.blog-pick-preview .pp-pull {
+  height: 16px;
+  width: 60%;
+  align-self: center;
+  background: transparent;
+  border-top: 1px solid var(--copper);
+  border-bottom: 1px solid var(--copper);
+  margin: 2px auto;
+  border-radius: 0;
+}
+.blog-pick-preview .pp-step {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  background: transparent;
+}
+.blog-pick-preview .pp-step .pp-num {
+  width: 16px;
+  height: 14px;
+  background: color-mix(in srgb, var(--copper) 50%, transparent);
+  border-radius: 2px;
+  font-size: 0;
+  flex-shrink: 0;
+}
+.blog-pick-preview .pp-spacer {
+  height: 12px;
+  background: transparent;
+}
+.blog-pick-preview .pp-row {
+  display: flex;
+  gap: 6px;
+  background: transparent;
+}
+.blog-pick-preview .pp-row .pp-square {
+  width: 42%;
+  aspect-ratio: 1 / 1;
+  background: color-mix(in srgb, var(--copper) 35%, transparent);
+  border-radius: 2px;
+}
+.blog-pick-preview .pp-row .pp-text-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: transparent;
+  padding-top: 2px;
+}
+.blog-pick-preview .pp-row .pp-text-col > * {
+  height: 5px;
+  background: color-mix(in srgb, var(--fg) 30%, transparent);
+  border-radius: 2px;
+}
+.blog-pick-preview .pp-row .pp-text-col > .short { width: 75%; }
+
+.blog-pick-name {
+  margin: 0 0 0.3rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+.blog-pick-desc {
+  margin: 0;
+  color: var(--ash);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+/* Composer header */
+
+.blog-edit-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+.blog-edit-header h1 {
+  margin: 0 0 0.3rem;
+  font-size: 1.7rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.blog-edit-lede {
+  margin: 0;
+  color: var(--ash);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  max-width: 64ch;
+}
+.blog-edit-switch {
+  background: transparent;
+  color: var(--ash);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+.blog-edit-switch:hover {
+  border-color: var(--copper);
+  color: var(--copper);
+}
+
+/* Composer canvas — wraps the editable slots */
+
+/* Canvas — the editor surface IS the published page. Mirrors the
+   palette the post will publish with, which by default tracks the
+   user's chosen app theme (light app → light canvas, dim/dark → ink).
+   What you type already looks like what publishes. */
+.blog-edit-canvas {
+  --canvas-ink: #0a0a0a;
+  --canvas-ink-2: #141414;
+  --canvas-bone: #f5f2eb;
+  --canvas-ash: #8a8a8a;
+  --canvas-copper: #c9732b;
+  --canvas-rule: #2a2a2a;
+  background: var(--canvas-ink);
+  color: var(--canvas-bone);
+  border: 1px solid var(--canvas-rule);
+  border-radius: 12px;
+  padding: 36px 24px 80px;
+}
+.blog-edit-canvas[data-palette="light"] {
+  --canvas-ink: #f5f2eb;
+  --canvas-ink-2: #ece5d3;
+  --canvas-bone: #1a1814;
+  --canvas-ash: #5c5650;
+  --canvas-copper: #b87333;
+  --canvas-rule: #d8d2c4;
+}
+.blog-edit-canvas[hidden] { display: none; }
+
+/* Preview is a full-window modal so the post renders the way a reader
+   would actually see it — full viewport, scrollable inside the iframe.
+   Background flips with the page palette (matches whatever's published). */
+.blog-edit-preview-pane {
+  --preview-bg: #0a0a0a;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--preview-bg);
+  display: flex;
+  flex-direction: column;
+}
+.blog-edit-preview-pane[data-palette="light"] {
+  --preview-bg: #f5f2eb;
+}
+.blog-edit-preview-pane[hidden] { display: none; }
+
+.blog-edit-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.5rem;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.blog-edit-preview-header h2 {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ash);
+}
+.blog-edit-preview-header-actions { display: flex; gap: 0.5rem; }
+.blog-edit-preview-close {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+.blog-edit-preview-close:hover {
+  border-color: var(--copper);
+  color: var(--copper);
+}
+.blog-edit-preview-etch {
+  background: var(--copper);
+  color: var(--bone);
+  border: 1px solid var(--copper);
+  border-radius: 6px;
+  padding: 0.5rem 1.2rem;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+body[data-theme="light"] .blog-edit-preview-etch { color: #fff; }
+.blog-edit-preview-etch:hover:not(:disabled) {
+  background: var(--copper-bright);
+  border-color: var(--copper-bright);
+}
+.blog-edit-preview-etch:disabled { opacity: 0.45; cursor: default; }
+
+.blog-edit-preview-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: var(--preview-bg);
+}
+
+body.blog-preview-open { overflow: hidden; }
+
+.blog-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 0 auto;
+}
+
+/* Page-wrap widths per template, mirroring each template's .wrap CSS
+   so the editing column is the same width as the published column. */
+.blog-composer[data-template="classic"]     { max-width: 62ch; }
+.blog-composer[data-template="article"]     { max-width: 68ch; }
+.blog-composer[data-template="featured"]    { max-width: 76ch; }
+.blog-composer[data-template="illustrated"] { max-width: 72ch; }
+.blog-composer[data-template="photoEssay"]  { max-width: 80ch; }
+.blog-composer[data-template="tutorial"]    { max-width: 72ch; }
+.blog-composer[data-template="note"]        { max-width: 52ch; gap: 1.5rem; padding-top: 60px; }
+
+/* Featured — the editor needs to mirror the rendered side-by-side
+   layout: 1:1 square hero on the left, opening paragraph on the right.
+   The .has-aspect drop zone already gives the slot a 1:1 frame via the
+   inline aspect-ratio; the grid below positions both slots. */
+.blog-composer[data-template="featured"] .featured-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+  margin: 0 0 24px;
+  align-items: start;
+}
+.blog-composer[data-template="featured"] .featured-grid .side-text { display: flex; }
+.blog-composer[data-template="featured"] .featured-grid .side-text .composer-slot { width: 100%; }
+.blog-composer[data-template="featured"] .featured-grid .composer-textarea { min-height: 18rem; }
+@media (max-width: 600px) {
+  .blog-composer[data-template="featured"] .featured-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Title/subtitle/body fonts for Featured match the rendered output. */
+.blog-composer[data-template="featured"] .slot-title .composer-input {
+  font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(34px, 5vw, 54px);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  margin: 0 0 14px;
+  padding: 0.2rem 0;
+}
+.blog-composer[data-template="featured"] .slot-subtitle .composer-input {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-size: clamp(18px, 2vw, 22px);
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--canvas-bone) 65%, var(--canvas-ash));
+  margin: 0 0 18px;
+  padding: 0.2rem 0;
+}
+.blog-composer[data-template="featured"] .composer-textarea {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.composer-slot { width: 100%; }
+
+/* Inputs read as plain typography until focused — no chrome at rest. */
+.composer-input,
+.composer-textarea {
+  width: 100%;
+  font-family: inherit;
+  color: var(--canvas-bone);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0.25rem 0.4rem;
+  outline: none;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.composer-input:hover,
+.composer-textarea:hover {
+  border-color: color-mix(in srgb, var(--canvas-ash) 30%, transparent);
+}
+.composer-input:focus,
+.composer-textarea:focus {
+  border-color: var(--canvas-copper);
+  background: color-mix(in srgb, var(--canvas-ink-2) 60%, transparent);
+}
+.composer-input::placeholder,
+.composer-textarea::placeholder {
+  color: color-mix(in srgb, var(--canvas-ash) 70%, transparent);
+}
+
+.composer-textarea {
+  resize: vertical;
+  min-height: 8rem;
+}
+
+/* ── Slot typography per template — mirrors the rendered output's
+   .wrap, .title, .lede, etc. so the composer literally previews itself. */
+
+/* Title — Instrument Serif italic for the serif-led templates */
+.blog-composer[data-template="classic"] .slot-title .composer-input,
+.blog-composer[data-template="illustrated"] .slot-title .composer-input,
+.blog-composer[data-template="photoEssay"] .slot-title .composer-input {
+  font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(34px, 5vw, 52px);
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+  margin: 0 0 14px;
+  padding: 0.2rem 0.4rem 0.2rem 0;
+}
+
+/* Article — Playfair Display roman 700 */
+.blog-composer[data-template="article"] .slot-title .composer-input {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 700;
+  font-size: clamp(36px, 4.5vw, 58px);
+  line-height: 1.08;
+  letter-spacing: -0.015em;
+  margin: 0 0 14px;
+  padding: 0.2rem 0;
+}
+.blog-composer[data-template="article"] .slot-subtitle .composer-input {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: clamp(18px, 2vw, 22px);
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--canvas-bone) 70%, var(--canvas-ash));
+  margin: 0 0 18px;
+  padding: 0.2rem 0;
+}
+.blog-composer[data-template="article"] .slot-byline .composer-input {
+  font-family: 'Source Serif Pro', Georgia, serif;
+  font-style: italic;
+  font-size: 14px;
+  color: var(--canvas-ash);
+  margin: 0 0 18px;
+  letter-spacing: 0.01em;
+}
+.blog-composer[data-template="article"] .composer-textarea {
+  font-family: 'Source Serif Pro', Georgia, serif;
+  font-size: 17px;
+  line-height: 1.65;
+}
+
+/* Tutorial — Space Grotesk title, Inter body */
+.blog-composer[data-template="tutorial"] .slot-title .composer-input {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: clamp(32px, 4vw, 48px);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin: 0 0 18px;
+  padding: 0.2rem 0;
+}
+.blog-composer[data-template="tutorial"] .composer-slot[data-slot-id$="-heading"] .composer-input {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 1.25;
+}
+.blog-composer[data-template="tutorial"] .composer-textarea,
+.blog-composer[data-template="tutorial"] .slot-intro .composer-textarea {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+/* Note — mono-only minimalist */
+.blog-composer[data-template="note"] .slot-date .composer-input {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-style: italic;
+  font-size: 13px;
+  color: var(--canvas-ash);
+  letter-spacing: 0.02em;
+}
+.blog-composer[data-template="note"] .composer-textarea {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+/* Classic / Illustrated / Photo essay — lede + intro + body shared
+   styling matches the rendered serif/mono palette. */
+.blog-composer[data-template="classic"] .slot-lede .composer-input,
+.blog-composer[data-template="illustrated"] .slot-lede .composer-input {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-size: clamp(18px, 2vw, 22px);
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--canvas-bone) 65%, var(--canvas-ash));
+  margin: 0 0 18px;
+}
+
+.blog-composer[data-template="photoEssay"] .slot-intro .composer-textarea {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-style: italic;
+  font-size: clamp(17px, 2vw, 20px);
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--canvas-bone) 65%, var(--canvas-ash));
+  min-height: 5rem;
+}
+
+.blog-composer[data-template="classic"] .composer-textarea,
+.blog-composer[data-template="illustrated"] .composer-textarea {
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.blog-composer[data-template="photoEssay"] .composer-slot[data-slot-id^="caption-"] .composer-textarea {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--canvas-bone);
+}
+
+/* Tutorial: subtle copper-numbered divider before each step heading.
+   First step has no divider since it sits directly under the intro. */
+.composer-slot[data-slot-id$="-heading"]:not([data-slot-id="step-1-heading"]) {
+  border-top: 1px solid var(--canvas-rule);
+  padding-top: 1.25rem;
+  margin-top: 0.75rem;
+}
+.composer-slot[data-slot-id$="-heading"]::before {
+  content: "";
+}
+.blog-composer[data-template="tutorial"] .composer-slot[data-slot-id$="-heading"]::before {
+  content: attr(data-slot-id);
+  display: block;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--canvas-copper);
+  margin-bottom: 6px;
+}
+.blog-composer[data-template="tutorial"] .composer-slot[data-slot-id="step-1-heading"]::before { content: "01"; }
+.blog-composer[data-template="tutorial"] .composer-slot[data-slot-id="step-2-heading"]::before { content: "02"; }
+.blog-composer[data-template="tutorial"] .composer-slot[data-slot-id="step-3-heading"]::before { content: "03"; }
+.blog-composer[data-template="tutorial"] .composer-slot[data-slot-id="step-4-heading"]::before { content: "04"; }
+
+/* Image drop zone */
+
+.composer-drop {
+  position: relative;
+  border: 2px dashed var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fg) 2%, transparent);
+  padding: 1.25rem;
+  min-height: 8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.composer-drop:hover { border-color: var(--copper); }
+.composer-drop.is-over {
+  border-color: var(--copper);
+  background: color-mix(in srgb, var(--copper) 8%, transparent);
+}
+
+/* Aspect-ratio drop zones (hero 16:9, photo-essay pair 3:2, etc.) —
+   override base padding/min-height so the frame matches the published
+   crop exactly. Background matches the canvas palette so the
+   double-click zoom-out (scale < 1) letterboxes against page color
+   rather than the editor card. */
+.composer-drop.has-aspect {
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--canvas-ink);
+}
+.composer-drop.has-aspect .composer-drop-empty {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+}
+.composer-drop.has-aspect .composer-drop-preview {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.composer-drop.has-aspect .composer-drop-img {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+  border-radius: 0;
+}
+.composer-drop.has-aspect .composer-drop-meta {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  background: color-mix(in srgb, #000 70%, transparent);
+  padding: 6px 10px;
+  margin-top: 0;
+  border-radius: 4px;
+  color: var(--bone);
+  backdrop-filter: blur(4px);
+}
+.composer-drop.has-aspect .composer-drop-clear {
+  background: transparent;
+  color: var(--bone);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.composer-drop-empty { text-align: center; }
+.composer-drop-empty[hidden] { display: none; }
+.composer-drop-prompt {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--fg);
+}
+.composer-drop-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.82rem;
+  color: var(--ash);
+}
+.composer-drop-pick {
+  background: transparent;
+  border: none;
+  color: var(--copper);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0;
+  text-decoration: underline;
+}
+.composer-drop-pick:hover { color: var(--copper-bright); }
+
+.composer-drop-aspect {
+  margin-left: 0.6rem;
+  font-size: 0.78rem;
+  color: var(--ash);
+  opacity: 0.85;
+}
+.composer-drop-privacy {
+  margin: 0.65rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ash);
+  font-style: italic;
+  opacity: 0.9;
+}
+
+.composer-drop-processing {
+  text-align: center;
+  color: var(--ash);
+  font-size: 0.92rem;
+  font-style: italic;
+  padding: 1rem;
+}
+.composer-drop-processing[hidden] { display: none; }
+.composer-drop-processing p { margin: 0; }
+
+.composer-drop-preview { width: 100%; }
+.composer-drop-preview[hidden] { display: none; }
+.composer-drop-img {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  background: var(--bg);
+  border-radius: 6px;
+}
+.composer-drop-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--ash);
+}
+.composer-drop-clear {
+  background: transparent;
+  color: var(--ash);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+}
+.composer-drop-clear:hover {
+  border-color: #c44;
+  color: #d6604c;
+}
+
+/* Action bar */
+
+.blog-edit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.blog-edit-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.blog-edit-size {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ash);
+}
+.blog-edit-size[data-tone="warn"] { color: #d6804a; }
+.blog-edit-words {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ash);
+  opacity: 0.85;
+}
+.blog-edit-words:empty { display: none; }
+
+.blog-edit-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.blog-edit-preview {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6rem 1.2rem;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+.blog-edit-preview:hover:not(:disabled) {
+  border-color: var(--copper);
+  color: var(--copper);
+}
+.blog-edit-preview:disabled { opacity: 0.45; cursor: default; }
+
+.blog-edit-etch {
+  background: var(--copper);
+  color: var(--bone);
+  border: 1px solid var(--copper);
+  border-radius: 8px;
+  padding: 0.65rem 1.5rem;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+body[data-theme="light"] .blog-edit-etch { color: #fff; }
+.blog-edit-etch:hover:not(:disabled) {
+  background: var(--copper-bright);
+  border-color: var(--copper-bright);
+}
+.blog-edit-etch:disabled { opacity: 0.45; cursor: default; }
+
+/* Result + error panels */
+
+.blog-edit-result {
+  background: var(--bg-elev);
+  border: 1px solid var(--copper);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.blog-edit-result[hidden] { display: none; }
+.blog-edit-result-headline {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--copper);
+}
+.blog-edit-result-addr {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  word-break: break-all;
+  user-select: text;
+}
+.blog-edit-result-actions { display: flex; gap: 0.5rem; }
+.blog-edit-result-actions button {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+}
+.blog-edit-result-actions button:hover:not(:disabled) {
+  border-color: var(--copper);
+  color: var(--copper);
+}
+
+.blog-edit-error {
+  background: var(--bg-elev);
+  border: 1px solid #c44;
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--fg);
+  white-space: pre-wrap;
+}
+.blog-edit-error[hidden] { display: none; }

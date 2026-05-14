@@ -7,6 +7,7 @@
 //! payment internally. WalletConnect Modal Web lands with the Wallet
 //! tab (V1) and swaps in the external-signer flow.
 
+mod blog;
 mod etch;
 mod secrets;
 
@@ -51,6 +52,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             etch::etch_file,
             etch::etch_text,
+            blog::etch_html,
             secrets::store_secret_key,
             secrets::clear_secret_key,
             secrets::has_secret_key,
