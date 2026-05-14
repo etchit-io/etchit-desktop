@@ -1,6 +1,8 @@
 # Third-Party Licenses
 
-etchit uses the following open-source libraries:
+etchit is dual-licensed under AGPL-3.0-only and a separate commercial
+license (see `COMMERCIAL.md`). It uses the following open-source
+libraries:
 
 ## Autonomi Network
 - **ant-core / ant-client** — GPL-3.0 — https://github.com/WithAutonomi/ant-client

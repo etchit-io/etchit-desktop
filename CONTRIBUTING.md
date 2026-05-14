@@ -17,18 +17,20 @@ improvements, bug reports, and feature work are all welcome.
 
 ## The CLA, plainly
 
-Before your first PR is merged, our friendly bot will ask you to sign a
-short Contributor License Agreement. Reasons it exists, in plain terms:
+etchit is **dual-licensed** under [`AGPL-3.0-only`](LICENSE) and a
+separate commercial license (see [`COMMERCIAL.md`](COMMERCIAL.md)). To
+keep both tracks coherent, contributions are accepted under a short
+Contributor License Agreement. The bot will ask you to sign it on your
+first PR. In plain terms:
 
 - **You keep the copyright in your contributions.** The CLA does not
   assign or transfer ownership.
-- **You license your work back to the project under the same GPL-3.0**
-  the project already ships under, plus a patent grant covering your
-  contribution.
-- **It keeps the project's options open.** We have no current plan to
-  relicense or dual-license, but if it ever became necessary years from
-  now, the CLA means we don't have to track every contributor down to
-  ask permission. You retain a permanent license to your own work.
+- **You license your work back to the project under the AGPL**, plus a
+  patent grant covering your contribution.
+- **You also grant the project the right to offer your contribution
+  under the commercial track**, so the dual-licensing stays coherent
+  across all of the codebase rather than just the parts written by the
+  maintainer.
 
 Signing is one comment on your PR — `I have read the CLA Document and I
 hereby sign the CLA`. The bot does the rest. The full text is at
@@ -78,9 +80,11 @@ live in [`docs/FFI_BUILD.md`](docs/FFI_BUILD.md) and the project's
 
 ## Licensing reminder
 
-etchit is GPL-3.0. Your contributions are licensed under the same.
-Anyone who receives a binary built from your contribution can request
-the source under the GPL terms.
+etchit is dual-licensed under AGPL-3.0-only and a separate commercial
+license. Your contributions are licensed under the AGPL, with the CLA
+above also granting the project the right to offer them under the
+commercial track. Anyone who receives a binary built under the AGPL
+can request the source under that license's terms.
 
 ## Code of conduct
 

@@ -116,4 +116,14 @@ etchit connects to the Autonomi production network on launch using built-in boot
 
 ## License
 
-GPL-3.0 — see [LICENSE](LICENSE).
+etchit is **dual-licensed**:
+
+- [`AGPL-3.0-only`](LICENSE) for open-source / community use. Strong
+  copyleft including the "network use" trigger.
+- A separate **commercial license** for closed-source / proprietary
+  embedding. See [`COMMERCIAL.md`](COMMERCIAL.md) for the option and
+  contact path.
+
+Pick whichever fits your use; you do not need both. Contributions are
+accepted under terms that allow the project to offer both tracks; see
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
