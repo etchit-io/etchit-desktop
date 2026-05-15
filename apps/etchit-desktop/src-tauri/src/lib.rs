@@ -9,6 +9,7 @@
 
 mod archive;
 mod blog;
+mod chainmark;
 mod etch;
 mod history;
 mod private_etch;
@@ -84,6 +85,7 @@ pub fn run() {
             private_etch::save_bytes_to_path,
             private_etch::file_size,
             private_etch::is_directory,
+            chainmark::personal_sign_with_keychain,
             private_store::private_load,
             private_store::private_append,
             private_store::private_delete,
