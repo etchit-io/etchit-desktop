@@ -38,7 +38,6 @@ export function mountSettings(host: HTMLElement): void {
     <div class="settings-content">
       <header class="settings-header">
         <h1>Settings</h1>
-        <p class="settings-lede">Premium defaults out of the box; everything optional below.</p>
       </header>
 
       <section class="settings-section">
