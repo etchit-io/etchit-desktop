@@ -2,6 +2,7 @@ import { applyTheme, loadTheme } from "./theme/theme";
 import { mountTabBar } from "./ui/tabBar";
 import { TAB_IDS, type TabId } from "./types";
 import { mountEtch } from "./tabs/etch";
+import { mountPrivate } from "./tabs/private";
 import { mountBlogger } from "./tabs/blogger";
 import { mountWebsite } from "./tabs/website";
 import { mountHistory } from "./tabs/history";
@@ -11,6 +12,7 @@ import { mountWalletPill } from "./wallet/statusPill";
 
 const MOUNTERS: Record<TabId, (host: HTMLElement) => void> = {
   etch: mountEtch,
+  private: mountPrivate,
   blogger: mountBlogger,
   website: mountWebsite,
   history: mountHistory,

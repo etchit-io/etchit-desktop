@@ -2,16 +2,28 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
 import { historyAppendBestEffort } from "../history/store";
+import { bindFileDropZone } from "../util/dragDrop";
+import { formatErr } from "../util/error";
 import { mountActiveWalletBanner } from "../wallet/activeBanner";
-import { uploadFileViaWallet, uploadTextViaWallet } from "../wallet/externalUpload";
+import {
+  uploadFilesViaWallet,
+  uploadFileViaWallet,
+  uploadTextViaWallet,
+} from "../wallet/externalUpload";
 import { loadWalletMode } from "../wallet/mode";
 
 type Mode = "text" | "file";
 
+interface PickedItem {
+  path: string;
+  label: string;
+  size: number;
+  isDir: boolean;
+}
+
 interface State {
   mode: Mode;
-  pickedPath: string | null;
-  pickedLabel: string | null;
+  picked: PickedItem[];
   status: "idle" | "etching";
 }
 
@@ -32,18 +44,16 @@ export function mountEtch(host: HTMLElement): void {
       </div>
 
       <section class="etch-form" data-mode="text">
-        <label class="etch-label" for="etch-title">Title <span class="etch-hint">(optional)</span></label>
-        <input id="etch-title" type="text" class="etch-input" placeholder="e.g. notes from a walk" spellcheck="false" />
-
         <label class="etch-label" for="etch-body">Body</label>
-        <textarea id="etch-body" class="etch-textarea" rows="14" placeholder="paste or type — markdown is fine, fetch>it renders prose with the title in a header bar"></textarea>
+        <textarea id="etch-body" class="etch-textarea" rows="14" placeholder="paste or type — exactly what you write is what lands on the network"></textarea>
       </section>
 
       <section class="etch-form" data-mode="file" hidden>
         <div class="etch-drop">
-          <p class="etch-drop-prompt">Pick any file — image, audio, video, PDF, EPUB, ZIP, whatever.</p>
-          <button type="button" class="etch-pick">Choose file…</button>
-          <p class="etch-picked" hidden></p>
+          <p class="etch-drop-prompt">Drop files or a folder here, or click to pick. Multiple files get bundled into one ZIP archive.</p>
+          <button type="button" class="etch-pick">Choose files…</button>
+          <ul class="etch-picked-list" hidden></ul>
+          <p class="etch-picked-summary" hidden></p>
         </div>
       </section>
 
@@ -55,19 +65,95 @@ export function mountEtch(host: HTMLElement): void {
     </div>
   `;
 
-  const state: State = { mode: "text", pickedPath: null, pickedLabel: null, status: "idle" };
+  const state: State = { mode: "text", picked: [], status: "idle" };
 
   const $ = <T extends HTMLElement>(sel: string): T => host.querySelector(sel) as T;
 
-  const titleEl = $<HTMLInputElement>("#etch-title");
   const bodyEl = $<HTMLTextAreaElement>("#etch-body");
-  const pickedEl = $<HTMLParagraphElement>(".etch-picked");
+  const dropEl = $<HTMLDivElement>(".etch-drop");
+  const pickedListEl = $<HTMLUListElement>(".etch-picked-list");
+  const pickedSummaryEl = $<HTMLParagraphElement>(".etch-picked-summary");
   const bannerEl = $<HTMLParagraphElement>(".etch-wallet-banner");
   const submitEl = $<HTMLButtonElement>(".etch-submit");
   const resultEl = $<HTMLDivElement>(".etch-result");
   const errorEl = $<HTMLDivElement>(".etch-error");
 
   mountActiveWalletBanner(bannerEl);
+
+  const renderPicked = (): void => {
+    pickedListEl.innerHTML = "";
+    pickedListEl.hidden = state.picked.length === 0;
+    for (const [i, item] of state.picked.entries()) {
+      const li = document.createElement("li");
+      li.className = "etch-picked-chip";
+      const name = document.createElement("span");
+      name.className = "etch-picked-name";
+      name.textContent = item.isDir ? `${item.label}/` : item.label;
+      const meta = document.createElement("span");
+      meta.className = "etch-picked-size";
+      meta.textContent = item.isDir ? "folder" : formatBytes(item.size);
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "etch-picked-clear";
+      x.setAttribute("aria-label", "Remove");
+      x.title = "Remove";
+      x.textContent = "×";
+      x.addEventListener("click", () => removePicked(i));
+      li.append(name, meta, x);
+      pickedListEl.appendChild(li);
+    }
+    const willBundle = state.picked.length > 1 || (state.picked.length === 1 && state.picked[0].isDir);
+    pickedSummaryEl.hidden = !willBundle;
+    if (willBundle) {
+      const rawTotal = state.picked.reduce((n, p) => n + p.size, 0);
+      const label = state.picked.length === 1 ? "folder" : `${state.picked.length} items`;
+      const baseSummary = `${label} · will be bundled as one ZIP · ${formatBytes(rawTotal)} raw, estimating zip size…`;
+      pickedSummaryEl.textContent = baseSummary;
+      // Resolve the precise zip size in the background; rawTotal is
+      // the floor (zipped archive is always ≥ data).
+      void invoke<number>("estimate_zip_size_command", {
+        paths: state.picked.map((p) => p.path),
+      })
+        .then((zipBytes) => {
+          // Render only if the same picked set is still showing.
+          if (pickedSummaryEl.textContent !== baseSummary) return;
+          pickedSummaryEl.textContent = `${label} · ${formatBytes(zipBytes)} ZIP (${formatBytes(rawTotal)} raw) — bundled as one upload.`;
+        })
+        .catch(() => {
+          pickedSummaryEl.textContent = `${label} · ${formatBytes(rawTotal)} raw — bundled as one ZIP.`;
+        });
+    } else {
+      pickedSummaryEl.textContent = "";
+    }
+    refreshSubmit();
+  };
+
+  const acceptPaths = async (paths: string[]): Promise<void> => {
+    const existing = new Set(state.picked.map((p) => p.path));
+    for (const p of paths) {
+      if (existing.has(p)) continue;
+      const [size, isDir] = await Promise.all([
+        invoke<number>("file_size", { path: p }).catch(() => 0),
+        invoke<boolean>("is_directory", { path: p }).catch(() => false),
+      ]);
+      state.picked.push({
+        path: p,
+        label: p.split(/[/\\]/).filter((s) => s.length > 0).pop() ?? p,
+        size,
+        isDir,
+      });
+    }
+    renderPicked();
+  };
+
+  const removePicked = (index: number): void => {
+    state.picked.splice(index, 1);
+    renderPicked();
+  };
+
+  bindFileDropZone(dropEl, (paths) => {
+    void acceptPaths(paths);
+  });
 
   function setMode(m: Mode): void {
     state.mode = m;
@@ -91,7 +177,7 @@ export function mountEtch(host: HTMLElement): void {
     submitEl.textContent = "Etch";
     submitEl.disabled = state.mode === "text"
       ? bodyEl.value.trim().length === 0
-      : state.pickedPath === null;
+      : state.picked.length === 0;
   }
 
   function showResult(address: string): void {
@@ -112,7 +198,7 @@ export function mountEtch(host: HTMLElement): void {
     });
     (resultEl.querySelector(".etch-result-open") as HTMLButtonElement).addEventListener("click", () => {
       void invoke("open_in_fetchit", { address }).catch((e: unknown) => {
-        showError(String(e));
+        showError(formatErr(e));
       });
     });
   }
@@ -142,14 +228,13 @@ export function mountEtch(host: HTMLElement): void {
   bodyEl.addEventListener("input", refreshSubmit);
 
   ($<HTMLButtonElement>(".etch-pick")).addEventListener("click", () => {
-    void openDialog({ multiple: false }).then((picked) => {
-      if (typeof picked !== "string") return;
-      state.pickedPath = picked;
-      state.pickedLabel = picked.split(/[/\\]/).pop() ?? picked;
-      pickedEl.hidden = false;
-      pickedEl.textContent = state.pickedLabel;
-      refreshSubmit();
-    }).catch(() => {});
+    void openDialog({ multiple: true })
+      .then((picked) => {
+        if (picked === null) return;
+        const paths = Array.isArray(picked) ? picked : [picked];
+        void acceptPaths(paths.filter((p): p is string => typeof p === "string"));
+      })
+      .catch(() => {});
   });
 
   submitEl.addEventListener("click", () => {
@@ -161,14 +246,17 @@ export function mountEtch(host: HTMLElement): void {
 
     const done = (address: string): void => {
       state.status = "idle";
+      if (state.mode === "text") {
+        const label = firstLine(bodyEl.value) || "Untitled text";
+        historyAppendBestEffort(address, label, "text");
+        bodyEl.value = "";
+      } else {
+        historyAppendBestEffort(address, fileLabel(state.picked), "file");
+        state.picked = [];
+        renderPicked();
+      }
       refreshSubmit();
       showResult(address);
-      if (state.mode === "text") {
-        const label = titleEl.value.trim() || firstLine(bodyEl.value) || "Untitled text";
-        historyAppendBestEffort(address, label, "text");
-      } else {
-        historyAppendBestEffort(address, state.pickedLabel ?? "File", "file");
-      }
     };
     const fail = (msg: string): void => {
       state.status = "idle";
@@ -181,29 +269,49 @@ export function mountEtch(host: HTMLElement): void {
       submitEl.textContent = msg;
     };
 
-    if (walletMode === "external") {
-      if (state.mode === "text") {
-        void uploadTextViaWallet(titleEl.value, bodyEl.value, setStatus).then(
+    if (state.mode === "text") {
+      if (walletMode === "external") {
+        void uploadTextViaWallet(bodyEl.value, setStatus).then(
           (r) => done(r.address),
-          (e) => fail(String(e)),
-        );
-      } else if (state.pickedPath) {
-        void uploadFileViaWallet(state.pickedPath, setStatus).then(
-          (r) => done(r.address),
-          (e) => fail(String(e)),
+          (e) => fail(formatErr(e)),
         );
       } else {
-        fail("no file selected");
+        void invoke<string>("etch_text", { body: bodyEl.value }).then(done, (e) => fail(formatErr(e)));
       }
       return;
     }
 
-    if (state.mode === "text") {
-      void invoke<string>("etch_text", { title: titleEl.value, body: bodyEl.value }).then(done, (e) => fail(String(e)));
-    } else if (state.pickedPath) {
-      void invoke<string>("etch_file", { path: state.pickedPath }).then(done, (e) => fail(String(e)));
+    // File mode. Single file → raw upload (byte-identical). One folder
+    // or ≥2 paths → zip-bundle (one upload, one address).
+    const items = state.picked;
+    if (items.length === 0) {
+      fail("no files selected");
+      return;
+    }
+    const isBundle = items.length > 1 || items[0].isDir;
+
+    if (walletMode === "external") {
+      if (isBundle) {
+        void uploadFilesViaWallet(items.map((i) => i.path), setStatus).then(
+          (r) => done(r.address),
+          (e) => fail(formatErr(e)),
+        );
+      } else {
+        void uploadFileViaWallet(items[0].path, setStatus).then(
+          (r) => done(r.address),
+          (e) => fail(formatErr(e)),
+        );
+      }
+      return;
+    }
+
+    if (isBundle) {
+      void invoke<string>("etch_files", { paths: items.map((i) => i.path) }).then(
+        done,
+        (e) => fail(formatErr(e)),
+      );
     } else {
-      fail("no file selected");
+      void invoke<string>("etch_file", { path: items[0].path }).then(done, (e) => fail(formatErr(e)));
     }
   });
 }
@@ -211,4 +319,17 @@ export function mountEtch(host: HTMLElement): void {
 function firstLine(body: string): string {
   const line = body.split("\n").map((s) => s.trim()).find((s) => s.length > 0) ?? "";
   return line.length > 80 ? `${line.slice(0, 77)}…` : line;
+}
+
+function fileLabel(picked: PickedItem[]): string {
+  if (picked.length === 0) return "File";
+  if (picked.length === 1) return picked[0].isDir ? `${picked[0].label}/` : picked[0].label;
+  return `${picked.length} files`;
+}
+
+function formatBytes(n: number): string {
+  if (n === 0) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }

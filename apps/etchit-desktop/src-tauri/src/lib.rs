@@ -7,9 +7,12 @@
 //! payment internally. WalletConnect Modal Web lands with the Wallet
 //! tab (V1) and swaps in the external-signer flow.
 
+mod archive;
 mod blog;
 mod etch;
 mod history;
+mod private_etch;
+mod private_store;
 mod secrets;
 mod wallet;
 
@@ -52,7 +55,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(etch::EtchState::default())
         .invoke_handler(tauri::generate_handler![
+            archive::estimate_zip_size_command,
             etch::etch_file,
+            etch::etch_files,
             etch::etch_text,
             blog::etch_html,
             secrets::store_secret_key,
@@ -66,7 +71,22 @@ pub fn run() {
             wallet::prepare_public_etch,
             wallet::prepare_public_etch_text,
             wallet::prepare_public_etch_file,
+            wallet::prepare_public_etch_files,
             wallet::finalize_public_etch,
+            private_etch::prepare_private_etch,
+            private_etch::prepare_private_etch_file,
+            private_etch::prepare_private_etch_files,
+            private_etch::finalize_private_etch,
+            private_etch::private_etch_internal_text,
+            private_etch::private_etch_internal_file,
+            private_etch::private_etch_internal_files,
+            private_etch::fetch_private_data,
+            private_etch::save_bytes_to_path,
+            private_etch::file_size,
+            private_etch::is_directory,
+            private_store::private_load,
+            private_store::private_append,
+            private_store::private_delete,
             open_in_fetchit,
         ])
         .run(tauri::generate_context!())

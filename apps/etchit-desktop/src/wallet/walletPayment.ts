@@ -1,0 +1,140 @@
+// Shared wallet-payment leg used by both public and private external
+// uploads. Caller does the prepare-side invoke (which differs between
+// public and private), hands the resulting payments + total here, and
+// receives the on-chain pay tx hash to thread into its finalize call.
+
+import { Interface, JsonRpcProvider, type Eip1193Provider } from "ethers";
+
+import { currentAccount, currentProvider, waitForConnection } from "./appkit";
+import {
+  ANT_TOKEN_ADDRESS,
+  ARBITRUM_CHAIN_ID,
+  ARBITRUM_RPC,
+  SESSION_BUDGET_ATTO,
+  VAULT_ADDRESS,
+} from "./constants";
+
+export interface PaymentDto {
+  rewards_address: string;
+  amount: string;
+  quote_hash: string;
+}
+
+export type Progress = (message: string) => void;
+
+const ERC20_ABI = [
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+];
+const VAULT_ABI = [
+  "function payForQuotes(tuple(address rewardsAddress, uint256 amount, bytes32 quoteHash)[] payments)",
+];
+const erc20Iface = new Interface(ERC20_ABI);
+const vaultIface = new Interface(VAULT_ABI);
+const rpc = new JsonRpcProvider(ARBITRUM_RPC, ARBITRUM_CHAIN_ID, { staticNetwork: true });
+
+export interface WalletPaymentResult {
+  payTxHash: string;
+  walletAddress: string;
+}
+
+/** Run the approve + payForQuotes leg of an external upload. Opens
+ *  the wallet modal if no session is connected. Throws with a
+ *  human-readable message on any leg failure. */
+export async function runWalletPayment(
+  payments: PaymentDto[],
+  totalAmount: string,
+  progress: Progress,
+): Promise<WalletPaymentResult> {
+  progress("Connecting wallet…");
+  let userAddress = await currentAccount();
+  if (!userAddress) userAddress = await waitForConnection();
+  const provider = await currentProvider();
+  if (!provider) throw new Error("Wallet connected but no provider available.");
+
+  await ensureArbitrumChain(provider);
+
+  const totalAtto = BigInt(totalAmount);
+
+  progress("Checking ANT allowance…");
+  const allowanceData = erc20Iface.encodeFunctionData("allowance", [userAddress, VAULT_ADDRESS]);
+  const allowanceHex = await rpc.call({ to: ANT_TOKEN_ADDRESS, data: allowanceData });
+  const allowance = BigInt(allowanceHex);
+  if (allowance < totalAtto) {
+    progress("Approve ANT spending in your wallet…");
+    const approveAmount = SESSION_BUDGET_ATTO > totalAtto ? SESSION_BUDGET_ATTO : totalAtto;
+    const approveData = erc20Iface.encodeFunctionData("approve", [VAULT_ADDRESS, approveAmount]);
+    const approveHash = await sendTx(provider, userAddress, ANT_TOKEN_ADDRESS, approveData);
+    progress(`Waiting for approval confirmation (${shortTx(approveHash)})…`);
+    const receipt = await rpc.waitForTransaction(approveHash);
+    if (receipt?.status !== 1) throw new Error(`ANT approve reverted (${approveHash}).`);
+  }
+
+  progress("Sign payment in your wallet…");
+  const vaultPayments = payments.map((p) => [
+    withHex(p.rewards_address),
+    BigInt(p.amount),
+    withHex(p.quote_hash),
+  ]);
+  const payData = vaultIface.encodeFunctionData("payForQuotes", [vaultPayments]);
+  const payTxHash = await sendTx(provider, userAddress, VAULT_ADDRESS, payData);
+  progress(`Waiting for payment confirmation (${shortTx(payTxHash)})…`);
+  const payReceipt = await rpc.waitForTransaction(payTxHash);
+  if (payReceipt?.status !== 1) throw new Error(`payForQuotes reverted (${payTxHash}).`);
+
+  return { payTxHash, walletAddress: userAddress };
+}
+
+/** Map the payments list into the `{quote_hash: tx_hash}` form
+ *  Rust expects for the finalize step. */
+export function txHashMap(payments: PaymentDto[], payTxHash: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const p of payments) out[p.quote_hash] = payTxHash;
+  return out;
+}
+
+async function ensureArbitrumChain(provider: Eip1193Provider): Promise<void> {
+  // AppKit pins request() to its configured network. If the wallet's
+  // active session is on a different chain, the request is rejected
+  // before reaching the wallet — switch first, fall back to add for
+  // wallets that don't know about Arbitrum One yet.
+  const hex = `0x${ARBITRUM_CHAIN_ID.toString(16)}`;
+  try {
+    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hex }] });
+  } catch (e: unknown) {
+    const code = (e as { code?: number }).code;
+    if (code !== 4902) return;
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [
+        {
+          chainId: hex,
+          chainName: "Arbitrum One",
+          nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+          rpcUrls: [ARBITRUM_RPC],
+          blockExplorerUrls: ["https://arbiscan.io"],
+        },
+      ],
+    });
+  }
+}
+
+async function sendTx(
+  provider: Eip1193Provider,
+  from: string,
+  to: string,
+  data: string,
+): Promise<string> {
+  return (await provider.request({
+    method: "eth_sendTransaction",
+    params: [{ from, to, data, value: "0x0" }],
+  })) as string;
+}
+
+function withHex(s: string): string {
+  return s.startsWith("0x") || s.startsWith("0X") ? s : `0x${s}`;
+}
+
+function shortTx(h: string): string {
+  return `${h.slice(0, 10)}…`;
+}

@@ -1,20 +1,20 @@
-// Top-bar wallet status pill. Always-visible answer to "which wallet
-// pays when I click Etch?". Reflects the active wallet mode (internal
-// vs WalletConnect) and the address that will sign. Clicking the pill
-// jumps to the Wallet tab so the user can switch or connect.
+// Top-bar wallet status pill. Always-visible answer to "what will pay
+// when I click Etch?". Shows the active mode badge + balances (ANT
+// then ETH) for whichever wallet is active. Address lives in the
+// inline `activeBanner` on each upload tab — no need to duplicate.
 //
-// State sources:
-//
-//   * `mode` from `wallet/mode.ts` (persisted in localStorage)
-//   * for `internal`: address derived in Rust via `internal_wallet_info`
-//     — kept locally cached, refreshed on relevant events
-//   * for `external`: address read from AppKit, kept live via the
-//     account-change subscription
+// Click anywhere on the pill → jump to the Wallet tab.
 
 import { invoke } from "@tauri-apps/api/core";
+import { Contract, JsonRpcProvider } from "ethers";
 
 import { currentAccount, onAccountChange } from "./appkit";
-import { shortHexAddress } from "./balance";
+import { formatToken, shortHexAddress } from "./balance";
+import {
+  ANT_TOKEN_ADDRESS,
+  ARBITRUM_CHAIN_ID,
+  ARBITRUM_RPC,
+} from "./constants";
 import {
   loadWalletMode,
   WALLET_MODE_CHANGED_EVENT,
@@ -27,13 +27,21 @@ interface InternalInfo {
   eth_wei: string;
 }
 
-/** Fired by the rest of the app when the keychain key changes (set /
- *  cleared from Settings → Advanced). The pill listens to refresh the
- *  cached internal address without waiting for a Wallet-tab visit. */
+/** Fired by the Settings tab when the keychain key is set or cleared. */
 export const KEYCHAIN_CHANGED_EVENT = "etchit:keychain-changed";
 
-let internalAddress: string | null = null;
-let externalAddress: string | null = null;
+const ERC20_ABI = ["function balanceOf(address owner) view returns (uint256)"];
+const rpc = new JsonRpcProvider(ARBITRUM_RPC, ARBITRUM_CHAIN_ID, { staticNetwork: true });
+const antContract = new Contract(ANT_TOKEN_ADDRESS, ERC20_ABI, rpc);
+
+interface WalletSnapshot {
+  address: string | null;
+  antAtto: string | null;
+  ethWei: string | null;
+}
+
+let internal: WalletSnapshot = { address: null, antAtto: null, ethWei: null };
+let external: WalletSnapshot = { address: null, antAtto: null, ethWei: null };
 let activeMode: WalletMode = "internal";
 
 export function mountWalletPill(host: HTMLElement): void {
@@ -60,8 +68,6 @@ export function mountWalletPill(host: HTMLElement): void {
   window.addEventListener(WALLET_MODE_CHANGED_EVENT, (e) => {
     activeMode = (e as CustomEvent).detail as WalletMode;
     paint();
-    // Re-pull both sources; the mode switch often follows a key-set
-    // or a wallet-connect, so the address picture has likely changed.
     void refreshInternal().then(paint);
     void refreshExternal().then(paint);
   });
@@ -72,45 +78,71 @@ export function mountWalletPill(host: HTMLElement): void {
 
 function render(host: HTMLElement): void {
   const isInternal = activeMode === "internal";
-  const address = isInternal ? internalAddress : externalAddress;
+  const snap = isInternal ? internal : external;
   const modeBadge = isInternal ? "INT" : "WC";
   const modeTitle = isInternal ? "Internal (paste-key)" : "WalletConnect";
 
-  if (address) {
-    host.dataset.state = "active";
-    host.title = `${modeTitle} · ${address} — click to manage`;
+  if (!snap.address) {
+    host.dataset.state = "empty";
+    host.title = isInternal
+      ? "No wallet key set — click to set one in Settings → Advanced"
+      : "No wallet connected — click to connect";
     host.innerHTML = `
       <span class="wallet-pill-badge">${modeBadge}</span>
-      <span class="wallet-pill-addr">${escapeHtml(shortHexAddress(address))}</span>
+      <span class="wallet-pill-empty">${isInternal ? "no key" : "connect"}</span>
     `;
     return;
   }
 
-  // No address for the active mode yet.
-  host.dataset.state = "empty";
-  host.title = isInternal
-    ? "No wallet key set — click to set one in Settings → Advanced"
-    : "No wallet connected — click to connect";
+  host.dataset.state = "active";
+  const ant = snap.antAtto ? formatToken(snap.antAtto) : "…";
+  const eth = snap.ethWei ? formatToken(snap.ethWei, 18, 4) : "…";
+  host.title = `${modeTitle} · ${shortHexAddress(snap.address)} — click for details`;
   host.innerHTML = `
     <span class="wallet-pill-badge">${modeBadge}</span>
-    <span class="wallet-pill-addr wallet-pill-empty">${isInternal ? "set key" : "connect"}</span>
+    <span class="wallet-pill-balance">
+      <span class="wallet-pill-amount">${ant}</span>
+      <span class="wallet-pill-symbol">ANT</span>
+    </span>
+    <span class="wallet-pill-sep">·</span>
+    <span class="wallet-pill-balance">
+      <span class="wallet-pill-amount">${eth}</span>
+      <span class="wallet-pill-symbol">ETH</span>
+    </span>
   `;
 }
 
 async function refreshInternal(): Promise<void> {
   try {
     const info = await invoke<InternalInfo | null>("internal_wallet_info");
-    internalAddress = info?.address ?? null;
+    if (!info) {
+      internal = { address: null, antAtto: null, ethWei: null };
+      return;
+    }
+    internal = { address: info.address, antAtto: info.ant_atto, ethWei: info.eth_wei };
   } catch {
-    internalAddress = null;
+    internal = { address: null, antAtto: null, ethWei: null };
   }
 }
 
 async function refreshExternal(): Promise<void> {
   try {
-    externalAddress = await currentAccount();
+    const addr = await currentAccount();
+    if (!addr) {
+      external = { address: null, antAtto: null, ethWei: null };
+      return;
+    }
+    // Snapshot the address right away; balances will populate when
+    // the RPC calls land. The pill renders "…" in the gap.
+    external = { address: addr, antAtto: null, ethWei: null };
+    const [antAtto, ethWei] = await Promise.all([
+      (antContract.balanceOf(addr) as Promise<bigint>).then((b) => b.toString()),
+      rpc.getBalance(addr).then((b) => b.toString()),
+    ]);
+    external = { address: addr, antAtto, ethWei };
   } catch {
-    externalAddress = null;
+    // Keep whatever address we have, drop balances.
+    external = { address: external.address, antAtto: null, ethWei: null };
   }
 }
 
@@ -118,19 +150,17 @@ let externalUnsub: (() => void) | null = null;
 async function subscribeToExternalChanges(onChange: () => void): Promise<void> {
   if (externalUnsub) externalUnsub();
   externalUnsub = await onAccountChange((a) => {
-    externalAddress = a.isConnected && a.address ? a.address : null;
-    onChange();
+    if (a.isConnected && a.address) {
+      external = { address: a.address, antAtto: null, ethWei: null };
+      onChange();
+      void refreshExternal().then(onChange);
+    } else {
+      external = { address: null, antAtto: null, ethWei: null };
+      onChange();
+    }
   });
 }
 
 function goToWalletTab(): void {
   window.dispatchEvent(new CustomEvent("etchit:goto-tab", { detail: "wallet" }));
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }

@@ -81,6 +81,10 @@ pub async fn internal_wallet_info() -> Result<Option<InternalWalletInfo>, String
 /// One payment line item the wallet must sign over (forwarded as-is
 /// from ant-ffi). Hex strings with no `0x` prefix; the frontend adds
 /// the prefix before encoding the `payForQuotes` calldata.
+///
+/// Shared with `private_etch` since both paths return the same
+/// payment shape — the only difference is whether the prepare result
+/// carries a data-map.
 #[derive(Serialize)]
 pub struct PaymentDto {
     pub rewards_address: String,
@@ -117,18 +121,16 @@ pub async fn prepare_public_etch(
     prepare_from_bytes(&client, data).await
 }
 
-/// Text variant: builds the etch/it envelope in Rust (identical to
-/// `etch_text`) so the JS side doesn't need to know the envelope
-/// shape. Mirrors the internal-mode path one-to-one.
+/// Text variant: ships the raw UTF-8 body bytes. Mirrors the
+/// internal-mode path one-to-one — bytes on the network are exactly
+/// what the user typed, no metadata wrapper.
 #[tauri::command]
 pub async fn prepare_public_etch_text(
     state: State<'_, EtchState>,
-    title: String,
     body: String,
 ) -> Result<PreparedPublicEtch, String> {
     let client = etch::get_or_build_external_client(&state).await?;
-    let envelope = build_envelope(&title, &body);
-    prepare_from_bytes(&client, envelope.into_bytes()).await
+    prepare_from_bytes(&client, body.into_bytes()).await
 }
 
 /// File variant: read the file in Rust and feed the bytes to ant-ffi's
@@ -142,6 +144,21 @@ pub async fn prepare_public_etch_file(
     let client = etch::get_or_build_external_client(&state).await?;
     let bytes =
         std::fs::read(&path).map_err(|e| format!("couldn't read {path}: {e}"))?;
+    prepare_from_bytes(&client, bytes).await
+}
+
+/// Multi-file variant: bundles the paths into a ZIP archive
+/// (no compression — see `archive::bundle_to_zip`) and prepares the
+/// upload as public data. The frontend pumps the wallet through the
+/// same approve / payForQuotes pipeline as a single file etch.
+#[tauri::command]
+pub async fn prepare_public_etch_files(
+    state: State<'_, EtchState>,
+    paths: Vec<String>,
+) -> Result<PreparedPublicEtch, String> {
+    let client = etch::get_or_build_external_client(&state).await?;
+    let path_bufs: Vec<std::path::PathBuf> = paths.into_iter().map(Into::into).collect();
+    let bytes = crate::archive::bundle_to_zip(&path_bufs)?;
     prepare_from_bytes(&client, bytes).await
 }
 
@@ -166,16 +183,6 @@ async fn prepare_from_bytes(
             .collect(),
         total_amount: prep.total_amount,
     })
-}
-
-// Mirrors `etch::build_envelope`. Duplicated here rather than made
-// public on `etch` because the wallet module is its own concern; the
-// envelope contract is small and stable enough that the duplication
-// costs less than coupling the modules.
-fn build_envelope(title: &str, body: &str) -> String {
-    let t = serde_json::to_string(title.trim()).unwrap_or_else(|_| "\"\"".into());
-    let b = serde_json::to_string(body).unwrap_or_else(|_| "\"\"".into());
-    format!(r#"{{"v":1,"meta":{{"title":{t},"lang":""}},"content":{b}}}"#)
 }
 
 /// Second half of the external-signer upload. `tx_hashes` maps each
@@ -212,18 +219,6 @@ mod tests {
         assert_eq!(RPC_URL, "https://arb1.arbitrum.io/rpc");
         assert_eq!(ANT_TOKEN_ADDRESS, "0xa78d8321B20c4Ef90eCd72f2588AA985A4BDb684");
         assert_eq!(VAULT_ADDRESS, "0x9A3EcAc693b699Fc0B2B6A50B5549e50c2320A26");
-    }
-
-    #[test]
-    fn envelope_matches_internal_mode() {
-        // The external-signer text flow must build the *exact* same
-        // bytes as `etch::etch_text` (the internal flow) so a
-        // re-etch in the other mode lands on the same address.
-        let s = build_envelope("Hello", "world");
-        assert_eq!(
-            s,
-            r#"{"v":1,"meta":{"title":"Hello","lang":""},"content":"world"}"#
-        );
     }
 
     #[test]

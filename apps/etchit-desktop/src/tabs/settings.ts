@@ -1,13 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { normalizeSecretKey } from "../etch/secretKey";
+import { applyTheme, loadTheme, type Theme } from "../theme/theme";
+import { formatErr } from "../util/error";
 import { KEYCHAIN_CHANGED_EVENT } from "../wallet/statusPill";
 
 function announceKeychainChange(): void {
   window.dispatchEvent(new CustomEvent(KEYCHAIN_CHANGED_EVENT));
 }
-
-import { normalizeSecretKey } from "../etch/secretKey";
-import { applyTheme, loadTheme, type Theme } from "../theme/theme";
 
 interface ThemeOption {
   id: Theme;
@@ -153,7 +153,7 @@ function mountAdvanced(host: HTMLElement): void {
 
   void invoke<boolean>("has_secret_key").then(
     (present) => (present ? setStatusStored() : setStatusEmpty()),
-    (e) => setStatusError(String(e)),
+    (e) => setStatusError(formatErr(e)),
   );
 
   input.addEventListener("input", refreshStoreEnabled);
@@ -173,7 +173,7 @@ function mountAdvanced(host: HTMLElement): void {
       (e) => {
         storeBtn.textContent = "Store key";
         refreshStoreEnabled();
-        setStatusError(String(e));
+        setStatusError(formatErr(e));
       },
     );
   });
@@ -191,7 +191,7 @@ function mountAdvanced(host: HTMLElement): void {
       (e) => {
         clearBtn.textContent = "Clear stored key";
         clearBtn.disabled = false;
-        setStatusError(String(e));
+        setStatusError(formatErr(e));
       },
     );
   });

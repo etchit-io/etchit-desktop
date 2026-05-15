@@ -7,6 +7,7 @@ export interface TabBarApi {
 
 const LABELS: Record<TabId, string> = {
   etch: "Etch",
+  private: "Private Etch",
   blogger: "Blogger",
   website: "Website",
   history: "History",

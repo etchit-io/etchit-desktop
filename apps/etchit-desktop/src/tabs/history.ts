@@ -12,6 +12,7 @@ import {
   historyLoad,
 } from "../history/store";
 import { kindLabel, relativeTime, shortAddress } from "../history/format";
+import { formatErr } from "../util/error";
 
 interface TabState {
   entries: HistoryEntry[];
@@ -107,7 +108,7 @@ export function mountHistory(host: HTMLElement): void {
     });
     (li.querySelector(".history-row-open") as HTMLButtonElement).addEventListener("click", () => {
       void invoke("open_in_fetchit", { address: entry.address }).catch((e: unknown) => {
-        flashStatus(String(e));
+        flashStatus(formatErr(e));
       });
     });
     (li.querySelector(".history-row-delete") as HTMLButtonElement).addEventListener("click", () => {
@@ -116,7 +117,7 @@ export function mountHistory(host: HTMLElement): void {
           state.entries = next;
           render();
         },
-        (e: unknown) => flashStatus(String(e)),
+        (e: unknown) => flashStatus(formatErr(e)),
       );
     });
 
@@ -133,7 +134,7 @@ export function mountHistory(host: HTMLElement): void {
         render();
         flashStatus("History cleared.");
       },
-      (e: unknown) => flashStatus(String(e)),
+      (e: unknown) => flashStatus(formatErr(e)),
     );
   });
 
@@ -146,7 +147,7 @@ export function mountHistory(host: HTMLElement): void {
       },
       (e: unknown) => {
         state.loaded = true;
-        flashStatus(`Couldn't load history: ${String(e)}`);
+        flashStatus(`Couldn't load history: ${formatErr(e)}`);
         render();
       },
     );

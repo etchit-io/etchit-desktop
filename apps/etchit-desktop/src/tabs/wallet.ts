@@ -14,6 +14,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Contract, JsonRpcProvider } from "ethers";
 
+import { formatErr } from "../util/error";
 import {
   currentAccount,
   onAccountChange,
@@ -115,7 +116,7 @@ function renderInternal(host: HTMLElement): void {
       paintInternalCard(host, info);
     },
     (e: unknown) => {
-      host.innerHTML = `<div class="wallet-card wallet-card-error"><strong>Couldn't load wallet</strong><p>${escapeHtml(String(e))}</p></div>`;
+      host.innerHTML = `<div class="wallet-card wallet-card-error"><strong>Couldn't load wallet</strong><p>${escapeHtml(formatErr(e))}</p></div>`;
     },
   );
 }
@@ -268,7 +269,7 @@ async function loadExternalBalance(host: HTMLElement, address: string): Promise<
     if (card) {
       const note = document.createElement("p");
       note.className = "wallet-card-error-inline";
-      note.textContent = `Balance lookup failed: ${String(e)}`;
+      note.textContent = `Balance lookup failed: ${formatErr(e)}`;
       card.appendChild(note);
     }
   }

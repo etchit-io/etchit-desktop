@@ -3,7 +3,7 @@
 //! V0 wires the Tauri backend straight into `ant-ffi`: the wallet key
 //! lives in the OS keychain, `Client::connect_with_wallet` brings up a
 //! mainnet connection on Arbitrum One, then [`Client::data_put_public`]
-//! (for text envelopes) or [`Client::file_upload_public`] (for files)
+//! (for text bytes) or [`Client::file_upload_public`] (for files)
 //! returns the 64-hex address.
 //!
 //! The connected client is cached in [`EtchState`] keyed by SHA256 of
@@ -11,10 +11,12 @@
 //! session. Rotating the key in Advanced invalidates the cache because
 //! the fingerprint changes.
 //!
-//! Envelope shape matches Android (`PasteUtils.kt`) so fetch>it's
-//! `EtchitEnvelopeHandler` recognises text etches. No etch/it strings
-//! ever land in the uploaded bytes — see `docs/upload-neutrality.md`.
+//! Text uploads ship as **raw UTF-8 bytes** — no envelope, no metadata
+//! wrapper. The same bytes uploaded from `ant-cli` or any other
+//! Autonomi client land on the same address. Title is purely local
+//! (stored in the History entry on this device).
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use ant_ffi::Client;
@@ -22,6 +24,7 @@ use sha2::{Digest, Sha256};
 use tauri::State;
 use tokio::sync::Mutex;
 
+use crate::archive;
 use crate::secrets;
 
 const RPC_URL: &str = "https://arb1.arbitrum.io/rpc";
@@ -56,18 +59,17 @@ pub struct EtchState {
     pub(crate) external: Mutex<Option<Arc<Client>>>,
 }
 
-/// Wrap `title` + `body` in the etch/it envelope JSON and upload as
-/// public data. Returns the 64-hex address.
+/// Upload raw text bytes as public data. The caller (frontend) keeps
+/// any title or other metadata locally — the bytes on the network are
+/// exactly what the user typed.
 #[tauri::command]
 pub async fn etch_text(
     state: State<'_, EtchState>,
-    title: String,
     body: String,
 ) -> Result<String, String> {
-    let envelope = build_envelope(&title, &body);
     let client = get_or_build_client(&state).await?;
     let result = client
-        .data_put_public(envelope.into_bytes(), PAYMENT_MODE.into())
+        .data_put_public(body.into_bytes(), PAYMENT_MODE.into())
         .await
         .map_err(|e| format!("upload failed: {e}"))?;
     Ok(result.address)
@@ -79,6 +81,28 @@ pub async fn etch_file(state: State<'_, EtchState>, path: String) -> Result<Stri
     let client = get_or_build_client(&state).await?;
     let result = client
         .file_upload_public(path, PAYMENT_MODE.into())
+        .await
+        .map_err(|e| format!("upload failed: {e}"))?;
+    Ok(result.address)
+}
+
+/// Bundle two-or-more files (or one folder) into a ZIP and upload
+/// that as public data. Returns the address of the archive. fetch>it
+/// renders the archive index out of the box.
+///
+/// Single-file callers should use [`etch_file`] instead — it keeps
+/// the bytes on the network byte-identical to the source, no archive
+/// wrapper.
+#[tauri::command]
+pub async fn etch_files(
+    state: State<'_, EtchState>,
+    paths: Vec<String>,
+) -> Result<String, String> {
+    let path_bufs: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    let zip_bytes = archive::bundle_to_zip(&path_bufs)?;
+    let client = get_or_build_client(&state).await?;
+    let result = client
+        .data_put_public(zip_bytes, PAYMENT_MODE.into())
         .await
         .map_err(|e| format!("upload failed: {e}"))?;
     Ok(result.address)
@@ -127,12 +151,6 @@ fn key_fingerprint(key: &str) -> [u8; 32] {
     Sha256::digest(key.as_bytes()).into()
 }
 
-fn build_envelope(title: &str, body: &str) -> String {
-    let t = serde_json::to_string(title.trim()).unwrap_or_else(|_| "\"\"".into());
-    let b = serde_json::to_string(body).unwrap_or_else(|_| "\"\"".into());
-    format!(r#"{{"v":1,"meta":{{"title":{t},"lang":""}},"content":{b}}}"#)
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -140,43 +158,6 @@ mod tests {
 
     const KEY_A: &str = "f4b86ae19e4b1e625ea2af9b15015340443988407f0ae56d28a1050e64ece167";
     const KEY_B: &str = "f4b86ae19e4b1e625ea2af9b15015340443988407f0ae56d28a1050e64ece168";
-
-    #[test]
-    fn envelope_matches_android_shape() {
-        let s = build_envelope("Hello", "world");
-        assert_eq!(
-            s,
-            r#"{"v":1,"meta":{"title":"Hello","lang":""},"content":"world"}"#
-        );
-    }
-
-    #[test]
-    fn envelope_escapes_specials() {
-        let s = build_envelope("a\"b", "c\\d\ne");
-        let parsed: serde_json::Value = serde_json::from_str(&s).unwrap();
-        assert_eq!(parsed["meta"]["title"], "a\"b");
-        assert_eq!(parsed["content"], "c\\d\ne");
-    }
-
-    #[test]
-    fn envelope_trims_title_only() {
-        let s = build_envelope("  trim  ", "  keep  ");
-        let parsed: serde_json::Value = serde_json::from_str(&s).unwrap();
-        assert_eq!(parsed["meta"]["title"], "trim");
-        assert_eq!(parsed["content"], "  keep  ");
-    }
-
-    #[test]
-    fn envelope_carries_no_brand_string() {
-        let s = build_envelope("anything", "any body");
-        let lower = s.to_lowercase();
-        for forbidden in ["etchit", "etch/it", "etch>it", "etchit.io"] {
-            assert!(
-                !lower.contains(forbidden),
-                "envelope must not contain {forbidden}"
-            );
-        }
-    }
 
     #[test]
     fn fingerprint_is_deterministic() {

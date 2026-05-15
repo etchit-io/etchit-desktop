@@ -5,6 +5,7 @@ import { mountComposer } from "../blog/composer";
 import { mountTemplatePicker } from "../blog/templatePicker";
 import type { BlogPalette, EditorState, Template } from "../blog/types";
 import { historyAppendBestEffort } from "../history/store";
+import { formatErr } from "../util/error";
 import { mountActiveWalletBanner } from "../wallet/activeBanner";
 import { uploadBytesViaWallet } from "../wallet/externalUpload";
 import { loadWalletMode } from "../wallet/mode";
@@ -184,7 +185,7 @@ function renderComposer(
     try {
       html = template.serialize(composer.getState(), { palette: currentPalette() });
     } catch (e) {
-      showError(errorEl, resultEl, String(e));
+      showError(errorEl, resultEl, formatErr(e));
       return;
     }
     previewFrame.srcdoc = html;
@@ -243,7 +244,7 @@ function renderComposer(
       refresh();
       previewEtchBtn.disabled = false;
       previewEtchBtn.textContent = "Etch";
-      showError(errorEl, resultEl, String(e));
+      showError(errorEl, resultEl, formatErr(e));
       return;
     }
 
@@ -261,7 +262,7 @@ function renderComposer(
       refresh();
       previewEtchBtn.disabled = false;
       previewEtchBtn.textContent = "Etch";
-      showError(errorEl, resultEl, String(e));
+      showError(errorEl, resultEl, formatErr(e));
     };
 
     if (loadWalletMode() === "external") {
@@ -302,7 +303,7 @@ function showResult(resultEl: HTMLElement, errorEl: HTMLElement, address: string
   });
   (resultEl.querySelector(".blog-edit-result-open") as HTMLButtonElement).addEventListener("click", () => {
     void invoke("open_in_fetchit", { address }).catch((e: unknown) => {
-      showError(errorEl, resultEl, String(e));
+      showError(errorEl, resultEl, formatErr(e));
     });
   });
 }

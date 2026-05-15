@@ -35,6 +35,10 @@ keyring = { version = "3", default-features = false, features = [
 # Fingerprint the wallet key so we can invalidate the cached Client
 # without keeping the key in two places.
 sha2 = "0.10"
+# Bundle multi-file Etch / Private Etch uploads into one ZIP so they
+# cost one upload and one wallet payment. `Stored` mode (no
+# compression) keeps each inner file byte-identical to its original.
+zip = { version = "2", default-features = false }
 
 # Transitive pins — `ant-node = 0.11.1` (pulled in via `ant-ffi`) is
 # source-incompatible with `saorsa-core >= 0.24.3` (added a

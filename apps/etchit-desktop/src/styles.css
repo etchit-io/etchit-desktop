@@ -502,14 +502,78 @@ code {
   font-size: 0.9rem;
 }
 .etch-pick:hover { background: var(--copper); color: var(--bg); }
-.etch-picked {
-  margin: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.82rem;
-  color: var(--fg);
-  word-break: break-all;
+.etch-drop.is-dragging {
+  border-color: var(--copper);
+  background: color-mix(in srgb, var(--copper) 8%, var(--bg-elev));
 }
-.etch-picked[hidden] { display: none; }
+.etch-picked-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+  max-width: 32rem;
+  /* The drop zone centers its children with `text-align: center`, but
+     a list of files looks tidier read top-down with left-aligned
+     names. Reset alignment on the chip list and its summary line. */
+  align-self: stretch;
+  text-align: left;
+}
+.etch-picked-list[hidden] { display: none; }
+.etch-picked-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.7rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.etch-picked-name {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.etch-picked-size {
+  color: var(--ash);
+  font-size: 0.78rem;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.etch-picked-summary {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ash);
+  font-style: italic;
+  align-self: stretch;
+  text-align: left;
+  max-width: 32rem;
+}
+.etch-picked-summary[hidden] { display: none; }
+.etch-picked-clear {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ash);
+  border-radius: 6px;
+  width: 1.6rem;
+  height: 1.6rem;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.12s, border-color 0.12s;
+}
+.etch-picked-clear:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
 
 .etch-submit {
   align-self: flex-end;
@@ -2324,7 +2388,19 @@ body[data-theme="light"] .site-edit-preview-etch { color: #fff; }
   color: var(--ash);
   border: 1px solid var(--ash);
 }
-.wallet-pill-addr { font-weight: 500; }
+.wallet-pill-balance {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  font-variant-numeric: tabular-nums;
+}
+.wallet-pill-amount { font-weight: 500; }
+.wallet-pill-symbol {
+  font-size: 0.65rem;
+  color: var(--ash);
+  letter-spacing: 0.04em;
+}
+.wallet-pill-sep { color: var(--ash); opacity: 0.6; }
 .wallet-pill-empty { color: var(--ash); font-style: italic; }
 
 /* ── Upload tabs: "Etching as…" inline footer ────────────────────────
@@ -2355,3 +2431,146 @@ body[data-theme="light"] .site-edit-preview-etch { color: #fff; }
   cursor: pointer;
 }
 .wallet-active-link:hover { color: var(--copper-bright); }
+
+/* ── Private tab ───────────────────────────────────────────────────── */
+/* The composer half of this tab reuses the Etch-tab styles wholesale
+   (`etch-tab`, `etch-header`, `etch-modes`, `etch-form`, etc.) so
+   page rhythm is identical. The rules below cover the bits Etch
+   doesn't have: the result-panel body line and the library list. */
+
+.private-library {
+  display: flex;
+  flex-direction: column;
+  margin-top: 1rem;
+}
+.private-result-body { margin: 0; color: var(--ash); font-size: 0.88rem; }
+
+.private-library-header h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+.private-library-hint {
+  margin: 0;
+  color: var(--ash);
+  font-size: 0.85rem;
+}
+
+.private-library-status {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.85rem;
+  background: var(--bg-elev);
+  border-left: 3px solid var(--copper);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.85rem;
+}
+.private-library-status[hidden] { display: none; }
+
+.private-library-empty {
+  margin-top: 1rem;
+  padding: 2rem 1rem;
+  text-align: center;
+  background: var(--bg-elev);
+  border-radius: 8px;
+  color: var(--ash);
+  font-size: 0.92rem;
+}
+.private-library-empty[hidden] { display: none; }
+
+.private-library-list {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.private-library-list[hidden] { display: none; }
+
+.private-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  background: var(--bg-elev);
+  border-radius: 8px;
+  transition: background 0.12s;
+}
+.private-row:hover { background: color-mix(in srgb, var(--bg-elev) 85%, var(--fg) 8%); }
+.private-row-main { min-width: 0; }
+.private-row-title {
+  margin: 0;
+  font-size: 0.98rem;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.private-row-meta {
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--ash);
+  margin-top: 0.2rem;
+  flex-wrap: wrap;
+}
+.private-row-mode {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--ash) 50%, transparent);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.private-row-dot { opacity: 0.6; }
+.private-row-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+.private-row-actions button {
+  background: transparent;
+  color: var(--ash);
+  border: 1px solid color-mix(in srgb, var(--ash) 40%, transparent);
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.private-row-actions button:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+.private-row-open {
+  color: var(--copper) !important;
+  border-color: color-mix(in srgb, var(--copper) 50%, transparent) !important;
+}
+.private-row-open:hover {
+  color: var(--copper-bright) !important;
+  border-color: var(--copper) !important;
+}
+.private-row-delete {
+  padding: 0.35rem 0.55rem !important;
+  font-size: 1rem !important;
+  line-height: 1;
+}
+.private-row-content {
+  grid-column: 1 / -1;
+  margin: 0.8rem 0 0;
+  padding: 0.8rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+  font-size: 0.85rem;
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+}
+.private-row-content[hidden] { display: none; }
