@@ -41,11 +41,13 @@ export function mountSettings(host: HTMLElement): void {
       </header>
 
       <section class="settings-section">
-        <h2>Appearance</h2>
-        <p class="settings-desc">
-          etch/it ships dark — pick a softer surface if dark isn&rsquo;t your thing.
-        </p>
-        <div class="settings-theme-options" role="radiogroup" aria-label="Theme"></div>
+        <details class="settings-collapsible">
+          <summary><h2>Appearance</h2></summary>
+          <p class="settings-desc">
+            etch/it ships dark — pick a softer surface if dark isn&rsquo;t your thing.
+          </p>
+          <div class="settings-theme-options" role="radiogroup" aria-label="Theme"></div>
+        </details>
       </section>
 
       <section class="settings-section">
@@ -81,18 +83,20 @@ export function mountSettings(host: HTMLElement): void {
       </section>
 
       <section class="settings-section">
-        <h2>About</h2>
-        <p class="settings-desc">
-          <strong>etch/it &mdash; beta software.</strong>
-          Dual-licensed under
-          <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer">AGPL-3.0-only</a>
-          and a separate commercial license (see <code>COMMERCIAL.md</code>). Provided
-          <em>&ldquo;AS IS&rdquo; without warranty of any kind</em>; see sections
-          15 &amp; 16 of the AGPL for the full disclaimer.
-        </p>
-        <p class="settings-desc settings-desc-muted">
-          Companion reader: <strong>fetch&gt;it</strong>.
-        </p>
+        <details class="settings-collapsible">
+          <summary><h2>About</h2></summary>
+          <p class="settings-desc">
+            <strong>etch/it &mdash; beta software.</strong>
+            Dual-licensed under
+            <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer">AGPL-3.0-only</a>
+            and a separate commercial license (see <code>COMMERCIAL.md</code>). Provided
+            <em>&ldquo;AS IS&rdquo; without warranty of any kind</em>; see sections
+            15 &amp; 16 of the AGPL for the full disclaimer.
+          </p>
+          <p class="settings-desc settings-desc-muted">
+            Companion reader: <strong>fetch&gt;it</strong>.
+          </p>
+        </details>
       </section>
     </div>
   `;
