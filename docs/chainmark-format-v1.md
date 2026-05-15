@@ -106,7 +106,7 @@ Concretely (no quotes; `\n` denotes the LF byte):
 etchit chainmark v1\n\nSign this message to derive your chainmark key. This signature does NOT authorize any transaction or transfer.
 ```
 
-The string is 137 bytes (UTF-8). SHA-256 of those bytes:
+The string is 131 bytes (UTF-8). SHA-256 of those bytes:
 `ab6f4ae288e6053c3e2181c83e33065c870a8b58b76b1d6b0072aba658cecab0`.
 
 The `personal_sign` prefix (`"\x19Ethereum Signed Message:\n" + len`)

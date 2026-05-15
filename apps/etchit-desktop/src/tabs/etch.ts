@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
+import { pushChainmarkBestEffort } from "../chainmark/sync";
 import { historyAppendBestEffort } from "../history/store";
 import { bindFileDropZone } from "../util/dragDrop";
 import { formatErr } from "../util/error";
@@ -246,15 +247,21 @@ export function mountEtch(host: HTMLElement): void {
 
     const done = (address: string): void => {
       state.status = "idle";
+      let label: string;
       if (state.mode === "text") {
-        const label = firstLine(bodyEl.value) || "Untitled text";
+        label = firstLine(bodyEl.value) || "Untitled text";
         historyAppendBestEffort(address, label, "text");
         bodyEl.value = "";
       } else {
-        historyAppendBestEffort(address, fileLabel(state.picked), "file");
+        label = fileLabel(state.picked);
+        historyAppendBestEffort(address, label, "file");
         state.picked = [];
         renderPicked();
       }
+      // Chainmark sync — fires only when the user opted in AND wallet
+      // mode is external. Best-effort: failures don't reverse the
+      // etch that already landed.
+      pushChainmarkBestEffort(address, label, "add");
       refreshSubmit();
       showResult(address);
     };

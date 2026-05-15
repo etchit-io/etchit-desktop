@@ -1,8 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import {
+  CHAINMARK_SETTING_CHANGED_EVENT,
+  loadChainmarkEnabled,
+  setChainmarkEnabled,
+} from "../chainmark/settings";
 import { normalizeSecretKey } from "../etch/secretKey";
 import { applyTheme, loadTheme, type Theme } from "../theme/theme";
 import { formatErr } from "../util/error";
+import {
+  loadWalletMode,
+  WALLET_MODE_CHANGED_EVENT,
+  type WalletMode,
+} from "../wallet/mode";
 import { KEYCHAIN_CHANGED_EVENT } from "../wallet/statusPill";
 
 function announceKeychainChange(): void {
@@ -84,6 +94,33 @@ export function mountSettings(host: HTMLElement): void {
 
       <section class="settings-section">
         <details class="settings-collapsible">
+          <summary><h2>Advanced &mdash; chainmark sync</h2></summary>
+          <p class="settings-desc">
+            Sync your public etches to a per-wallet, encrypted index
+            on Arbitrum One so other devices using the same wallet can
+            replay your history. Costs gas (~$0.001 per etch); never
+            sends private etches.
+          </p>
+          <div class="settings-warn">
+            <p class="settings-warn-title">Chainmarks are permanent.</p>
+            <p class="settings-warn-body">
+              Every batch is a forever artifact on Arbitrum. If your
+              wallet is ever compromised, every title you ever synced
+              becomes readable. Avoid sensitive titles.
+            </p>
+          </div>
+          <label class="settings-chainmark-row">
+            <input type="checkbox" class="settings-chainmark-toggle" />
+            <span class="settings-chainmark-text">
+              <span class="settings-chainmark-label">Sync this device&rsquo;s etches to chain</span>
+              <span class="settings-chainmark-hint"></span>
+            </span>
+          </label>
+        </details>
+      </section>
+
+      <section class="settings-section">
+        <details class="settings-collapsible">
           <summary><h2>About</h2></summary>
           <p class="settings-desc">
             <strong>etch/it &mdash; beta software.</strong>
@@ -103,6 +140,34 @@ export function mountSettings(host: HTMLElement): void {
 
   mountAppearance(host);
   mountAdvanced(host);
+  mountChainmark(host);
+}
+
+function mountChainmark(host: HTMLElement): void {
+  const toggle = host.querySelector(".settings-chainmark-toggle") as HTMLInputElement;
+  const hint = host.querySelector(".settings-chainmark-hint") as HTMLElement;
+
+  const apply = (mode: WalletMode): void => {
+    const wcOnly = mode !== "external";
+    toggle.checked = loadChainmarkEnabled() && !wcOnly;
+    toggle.disabled = wcOnly;
+    hint.textContent = wcOnly
+      ? "WalletConnect required — switch wallet mode on the Wallet tab to enable."
+      : "Pops your wallet to sign once for the key, then once per etch to send the chainmark.";
+  };
+
+  toggle.addEventListener("change", () => {
+    setChainmarkEnabled(toggle.checked);
+  });
+
+  apply(loadWalletMode());
+  window.addEventListener(WALLET_MODE_CHANGED_EVENT, (e) => {
+    apply((e as CustomEvent).detail as WalletMode);
+  });
+  window.addEventListener(CHAINMARK_SETTING_CHANGED_EVENT, () => {
+    const wcOnly = loadWalletMode() !== "external";
+    toggle.checked = loadChainmarkEnabled() && !wcOnly;
+  });
 }
 
 function mountAppearance(host: HTMLElement): void {
