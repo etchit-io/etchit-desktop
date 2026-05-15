@@ -34,5 +34,6 @@ __pycache__/
 apps/etchit-desktop/dist/
 apps/etchit-desktop/src-tauri/gen/
 
-# Closed planning / drafts (never pushed)
-private/
+# Closed planning / drafts (never pushed). Anchored — must NOT match
+# `apps/*/src/private/`, which is real source.
+/private/
