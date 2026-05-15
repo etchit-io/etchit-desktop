@@ -27,6 +27,10 @@ import {
 } from "../private/store";
 import { bindFileDropZone } from "../util/dragDrop";
 import { formatErr } from "../util/error";
+import { backupDecrypt, backupEncrypt } from "../private/backup";
+import { openBackupModal } from "../private/backupModal";
+import { decryptDataMap, encryptDataMap } from "../private/cipherEntry";
+import { getOrDeriveStorageKey } from "../private/storageKey";
 import { mountActiveWalletBanner } from "../wallet/activeBanner";
 import {
   uploadPrivateFileViaWallet,
@@ -104,8 +108,14 @@ export function mountPrivate(host: HTMLElement): void {
 
       <section class="private-library">
         <header class="private-library-header">
-          <h2>Your private etches</h2>
-          <p class="private-library-hint">Local to this device. Decrypt by tapping an entry.</p>
+          <div>
+            <h2>Your private etches</h2>
+            <p class="private-library-hint">Local to this device. Decrypt by tapping an entry.</p>
+          </div>
+          <div class="private-library-actions">
+            <button type="button" class="private-export-btn" title="Export an encrypted backup">Export…</button>
+            <button type="button" class="private-import-btn" title="Import a backup from another device">Import…</button>
+          </div>
         </header>
         <p class="private-library-status" hidden role="status"></p>
         <div class="private-library-empty" hidden>
@@ -340,10 +350,19 @@ export function mountPrivate(host: HTMLElement): void {
     (li.querySelector(".private-row-export") as HTMLButtonElement).addEventListener(
       "click",
       () => {
-        void navigator.clipboard.writeText(entry.data_map).then(
-          () => flashLibrary("Data-map copied. Keep it safe."),
-          () => flashLibrary("Couldn't copy."),
-        );
+        // Export = clipboard the *plaintext* data-map. Per-entry
+        // export is a recovery hatch: paste it into the CLI or
+        // another client to fetch the encrypted bytes. Needs the
+        // wallet sig to decrypt the at-rest cipher first.
+        void (async () => {
+          try {
+            const dm = await dataMapFor(entry);
+            await navigator.clipboard.writeText(dm);
+            flashLibrary("Data-map copied. Keep it safe.");
+          } catch (e) {
+            flashLibrary(`Couldn't copy: ${formatErr(e)}`);
+          }
+        })();
       },
     );
     (li.querySelector(".private-row-delete") as HTMLButtonElement).addEventListener(
@@ -382,6 +401,19 @@ export function mountPrivate(host: HTMLElement): void {
 
   window.addEventListener(PRIVATE_CHANGED_EVENT, refreshEntries);
   refreshEntries();
+
+  (root.querySelector(".private-export-btn") as HTMLButtonElement).addEventListener(
+    "click",
+    () => {
+      void exportLibrary(state, flashLibrary);
+    },
+  );
+  (root.querySelector(".private-import-btn") as HTMLButtonElement).addEventListener(
+    "click",
+    () => {
+      void importLibrary(state, flashLibrary, refreshEntries);
+    },
+  );
 
   submitEl.addEventListener("click", () => {
     if (state.status === "etching") return;
@@ -514,10 +546,32 @@ export function mountPrivate(host: HTMLElement): void {
     title: string;
     original_filename?: string;
   }): Promise<void> => {
+    // At-rest encryption: every new entry gets its data-map wrapped
+    // with the wallet-derived storage key before hitting disk. A
+    // leaked `private_etches.json` is useless without the wallet
+    // signature that derives the same key.
+    let cipher_data_map: string | undefined;
+    let owner_id: string | undefined;
+    let fallbackDataMap = "";
+    try {
+      const sk = await getOrDeriveStorageKey();
+      cipher_data_map = await encryptDataMap(sk.key, input.data_map);
+      owner_id = sk.ownerId;
+    } catch (e) {
+      // Derivation failed (user rejected the sign, no wallet, etc.).
+      // Fall back to plaintext storage — the etch already landed, the
+      // data-map shouldn't be thrown away. Surface a clear warning.
+      fallbackDataMap = input.data_map;
+      errorEl.hidden = false;
+      errorEl.textContent = `Couldn't derive the at-rest key: ${formatErr(e)}. Saved with plaintext data-map; sign in to encrypt later.`;
+    }
+
     const entry: PrivateEntry = {
       id: newEntryId(),
       title: input.title,
-      data_map: input.data_map,
+      data_map: fallbackDataMap,
+      ...(cipher_data_map ? { cipher_data_map } : {}),
+      ...(owner_id ? { owner_id } : {}),
       size_bytes: input.size_bytes,
       wallet_mode: input.wallet_mode,
       wallet_address: input.wallet_address,
@@ -553,9 +607,29 @@ export function mountPrivate(host: HTMLElement): void {
   };
 }
 
+/** Resolve the plaintext data-map for an entry. Prefers
+ *  `cipher_data_map` (the new shape) and falls back to the legacy
+ *  plaintext `data_map` field. Throws on missing-or-corrupt cipher
+ *  / wrong-wallet — caller surfaces the right message. */
+async function dataMapFor(entry: PrivateEntry): Promise<string> {
+  if (entry.cipher_data_map) {
+    const sk = await getOrDeriveStorageKey();
+    const plain = await decryptDataMap(sk.key, entry.cipher_data_map);
+    if (plain == null) {
+      throw new Error(
+        `couldn't decrypt — wallet doesn't match the one that saved this entry (${entry.owner_id ?? "?"})`,
+      );
+    }
+    return plain;
+  }
+  if (entry.data_map) return entry.data_map;
+  throw new Error("entry has no data-map");
+}
+
 async function decryptText(entry: PrivateEntry, el: HTMLElement): Promise<void> {
   try {
-    const bytes = await fetchPrivateData(entry.data_map);
+    const dataMap = await dataMapFor(entry);
+    const bytes = await fetchPrivateData(dataMap);
     const text = new TextDecoder().decode(bytes);
     // Old entries (pre-envelope-removal) shipped as
     // `{"v":1,"meta":{...},"content":"..."}`. Detect that shape
@@ -588,7 +662,8 @@ async function saveFile(
 ): Promise<void> {
   try {
     flash("Decrypting…");
-    const bytes = await fetchPrivateData(entry.data_map);
+    const dataMap = await dataMapFor(entry);
+    const bytes = await fetchPrivateData(dataMap);
     const dest = await saveDialog({
       defaultPath: entry.original_filename ?? entry.title,
       title: "Save decrypted file",
@@ -616,4 +691,114 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+// ── Export / Import ────────────────────────────────────────────────
+
+async function exportLibrary(
+  state: { entries: PrivateEntry[] },
+  flash: (msg: string) => void,
+): Promise<void> {
+  if (state.entries.length === 0) {
+    flash("Nothing to export — library is empty.");
+    return;
+  }
+  const password = await openBackupModal("create");
+  if (!password) return;
+
+  flash("Encrypting…");
+  // The payload is the entries JSON verbatim. Each entry already
+  // carries `cipher_data_map` (wallet-key encrypted), so the
+  // password-encrypted file wraps already-encrypted blobs — both
+  // factors required to recover content on another device.
+  const payload = new TextEncoder().encode(
+    JSON.stringify({ v: 1, entries: state.entries }),
+  );
+  let bytes: Uint8Array;
+  try {
+    bytes = await backupEncrypt(payload, password);
+  } catch (e) {
+    flash(`Encrypt failed: ${formatErr(e)}`);
+    return;
+  }
+
+  const dest = await saveDialog({
+    defaultPath: `etchit-private-backup-${new Date().toISOString().slice(0, 10)}.etchitbackup`,
+    title: "Save private library backup",
+    filters: [{ name: "etch/it backup", extensions: ["etchitbackup"] }],
+  });
+  if (typeof dest !== "string") {
+    flash("Cancelled.");
+    return;
+  }
+  try {
+    await invoke("save_bytes_to_path", { path: dest, data: Array.from(bytes) });
+    flash(`Backup saved to ${dest}. Keep the passphrase safe.`);
+  } catch (e) {
+    flash(`Couldn't save: ${formatErr(e)}`);
+  }
+}
+
+async function importLibrary(
+  state: { entries: PrivateEntry[] },
+  flash: (msg: string) => void,
+  refresh: () => void,
+): Promise<void> {
+  const picked = await openDialog({
+    multiple: false,
+    filters: [{ name: "etch/it backup", extensions: ["etchitbackup"] }],
+  });
+  if (typeof picked !== "string") return;
+
+  let bytes: Uint8Array;
+  try {
+    const arr = await invoke<number[]>("read_file_bytes", { path: picked });
+    bytes = Uint8Array.from(arr);
+  } catch (e) {
+    flash(`Couldn't read backup: ${formatErr(e)}`);
+    return;
+  }
+
+  const password = await openBackupModal("enter");
+  if (!password) return;
+
+  flash("Decrypting…");
+  const plain = await backupDecrypt(bytes, password);
+  if (!plain) {
+    flash("Wrong passphrase, or this isn't an etch/it backup file.");
+    return;
+  }
+
+  let parsed: { entries?: unknown };
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(plain)) as { entries?: unknown };
+  } catch (e) {
+    flash(`Backup file is malformed: ${formatErr(e)}`);
+    return;
+  }
+  if (!Array.isArray(parsed.entries)) {
+    flash("Backup file is malformed: no entries array.");
+    return;
+  }
+
+  let added = 0;
+  let skipped = 0;
+  const existing = new Set(state.entries.map((e) => e.id));
+  for (const e of parsed.entries as PrivateEntry[]) {
+    if (!e.id || existing.has(e.id)) {
+      skipped++;
+      continue;
+    }
+    try {
+      await privateAppend(e);
+      added++;
+      existing.add(e.id);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[private] import skip", e.id, err);
+      skipped++;
+    }
+  }
+  flash(`Imported ${added} entr${added === 1 ? "y" : "ies"}${skipped ? ` (skipped ${skipped})` : ""}.`);
+  refresh();
 }

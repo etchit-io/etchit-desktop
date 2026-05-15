@@ -253,6 +253,23 @@ pub fn is_directory(path: String) -> bool {
     std::fs::metadata(&path).map(|m| m.is_dir()).unwrap_or(false)
 }
 
+/// Read a whole file off disk. Used by the private-library backup
+/// import — the JS side picks the file, this command reads it, the
+/// JS decrypts the resulting bytes. Capped at 100 MB so a stray
+/// pick can't OOM the renderer.
+#[tauri::command]
+pub fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    const MAX: u64 = 100 * 1024 * 1024;
+    let meta = std::fs::metadata(&path).map_err(|e| format!("stat {path}: {e}"))?;
+    if meta.len() > MAX {
+        return Err(format!(
+            "file too large: {} bytes (cap {MAX})",
+            meta.len()
+        ));
+    }
+    std::fs::read(&path).map_err(|e| format!("read {path}: {e}"))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
