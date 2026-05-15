@@ -1,18 +1,18 @@
 // At-rest storage key — derived from a wallet signature over the
-// frozen `SIGN_MESSAGE_PRIVATE`, scoped via HKDF info to be distinct
-// from the chainmark key derived from the *other* frozen message.
+// frozen `SIGN_MESSAGE_PRIVATE`, scoped via HKDF info string so the
+// derived key is bound to this single purpose.
 //
 // Both wallet modes are supported:
 //   * External (WalletConnect): pop the wallet via AppKit, get
 //     `personal_sign` over the bytes.
-//   * Internal (keychain): hand the bytes to the Rust signer
-//     (`personal_sign_with_keychain`) so the private key never
-//     crosses the Tauri IPC boundary.
+//   * Internal (keychain): hand the bytes to the Rust signer so the
+//     private key never crosses the Tauri IPC boundary.
 //
 // Cache: 32-byte derived key persisted to localStorage, keyed by
 // wallet address (or by `keychain:<fingerprint>` when the user is in
-// internal mode and has no external account yet). Matches the
-// chainmark-key caching strategy — same trust model, same trade-off.
+// internal mode and has no external account yet). The cache stays
+// next to the cipher it unlocks — same trust boundary as the OS
+// user account.
 
 import { invoke } from "@tauri-apps/api/core";
 import type { Eip1193Provider } from "ethers";

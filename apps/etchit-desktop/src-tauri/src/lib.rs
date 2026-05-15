@@ -9,12 +9,12 @@
 
 mod archive;
 mod blog;
-mod chainmark;
 mod etch;
 mod history;
 mod private_etch;
 mod private_store;
 mod secrets;
+mod signer;
 mod wallet;
 
 /// Hand a freshly-etched `autonomi://<addr>` URL to the OS scheme handler
@@ -86,7 +86,7 @@ pub fn run() {
             private_etch::file_size,
             private_etch::is_directory,
             private_etch::read_file_bytes,
-            chainmark::personal_sign_with_keychain,
+            signer::personal_sign_with_keychain,
             private_store::private_load,
             private_store::private_append,
             private_store::private_delete,

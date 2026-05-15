@@ -1,24 +1,18 @@
-//! Chainmark v1 — internal-mode signing helpers.
+//! EIP-191 `personal_sign` over the keychain wallet key.
 //!
-//! WalletConnect mode signs `personal_sign` and `eth_sendTransaction`
-//! through AppKit's provider directly in JS; nothing here applies.
+//! Used by the private-etch at-rest encryption path: the JS side
+//! hands the message bytes here, this module signs in Rust using
+//! the key stored in the OS keychain (never crosses the IPC
+//! boundary), and the 65-byte signature comes back hex-encoded.
 //!
-//! Internal mode (keychain key) can't expose the private key to JS —
-//! the key never crosses the Tauri IPC boundary — so the JS side
-//! hands the message bytes here, this module signs in Rust using the
-//! key it pulls from the OS keychain, and only the 65-byte signature
-//! crosses back. Same byte format the spec mandates for cross-client
-//! sync.
-//!
-//! Implements §4.1 / §4.2 of `docs/chainmark-format-v1.md`:
-//!
-//! 1. Prefix the message with EIP-191's
-//!    `"\x19Ethereum Signed Message:\n" + len(message)`.
-//! 2. keccak256 the prefixed bytes.
-//! 3. ECDSA-secp256k1 sign with RFC 6979 deterministic-k (the
-//!    determinism §4.5 relies on for cross-device key derivation).
-//! 4. Return `r || s || v` (65 bytes); v in `{27, 28}` per legacy
-//!    EIP-191.
+//! Implements EIP-191's `personal_sign`:
+//!   1. Prefix with `"\x19Ethereum Signed Message:\n" + len(message)`.
+//!   2. keccak256 the prefixed bytes.
+//!   3. ECDSA-secp256k1 sign with RFC 6979 deterministic-k (so the
+//!      same wallet on a different device produces the same
+//!      signature, and the derived key matches).
+//!   4. Return `r || s || v` with v in `{27, 28}` per legacy
+//!      EIP-191.
 
 use k256::ecdsa::{signature::hazmat::PrehashSigner, RecoveryId, Signature, SigningKey};
 use sha3::{Digest, Keccak256};
@@ -26,12 +20,11 @@ use sha3::{Digest, Keccak256};
 use crate::secrets;
 
 const NO_KEY_HINT: &str =
-    "no wallet key stored — chainmark signing needs Settings → Advanced or WalletConnect.";
+    "no wallet key stored — sign needs a key in Settings → Advanced.";
 
-/// Sign `message` with the wallet stored in the OS keychain using the
-/// EIP-191 `personal_sign` envelope. Returns the 65-byte signature
-/// (`r || s || v`) as lowercase hex with the `0x` prefix — same
-/// shape EIP-1193 providers return.
+/// Sign `message` with the wallet stored in the OS keychain. Returns
+/// the 65-byte signature (`r || s || v`) as a `0x`-prefixed
+/// lowercase hex string — same shape EIP-1193 providers return.
 #[tauri::command]
 pub fn personal_sign_with_keychain(message: Vec<u8>) -> Result<String, String> {
     let key_hex = secrets::get_stored_key().ok_or_else(|| NO_KEY_HINT.to_string())?;
@@ -73,14 +66,9 @@ fn eip191_digest(message: &[u8]) -> [u8; 32] {
 mod tests {
     use super::*;
 
-    // Cross-client EIP-191 interop vector. The same `(key, msg)` pair
-    // produces the same 65-byte signature here, in ethers.js, in
-    // AppKit/WalletConnect, and in the Android Kotlin signer. If
-    // those go out of sync, every chainmark goes silently un-syncable
-    // across devices.
-    //
-    // Computed once with `ethers.Wallet(KEY).signMessage("hello")` —
-    // pinned at the JS side in `src/chainmark/eip191.test.ts`.
+    // Cross-vector against ethers.js — locks the EIP-191 envelope
+    // and RFC 6979 nonce so signatures match what JS-side wallets
+    // produce. Pinned at the JS side too if anyone needs to update.
     const TEST_KEY: &str =
         "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318";
     const TEST_MSG: &[u8] = b"hello";
@@ -91,17 +79,14 @@ mod tests {
     );
 
     #[test]
-    fn matches_eip191_vector() {
+    fn matches_ethers_vector() {
         let sig = sign_personal(TEST_MSG, TEST_KEY).unwrap();
-        let got = format!("0x{}", hex::encode(sig));
-        assert_eq!(got, EXPECTED_SIG);
+        assert_eq!(format!("0x{}", hex::encode(sig)), EXPECTED_SIG);
     }
 
     #[test]
     fn is_deterministic_per_rfc6979() {
-        // §4.5 of the chainmark spec: the same wallet must produce
-        // the same signature on every re-derivation. RFC 6979
-        // guarantees this; this test confirms `k256` honours it.
+        // Same (key, message) → same signature on every device.
         let a = sign_personal(TEST_MSG, TEST_KEY).unwrap();
         let b = sign_personal(TEST_MSG, TEST_KEY).unwrap();
         assert_eq!(a, b);

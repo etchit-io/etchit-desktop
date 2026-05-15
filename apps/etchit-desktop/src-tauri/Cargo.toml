@@ -39,11 +39,10 @@ sha2 = "0.10"
 # cost one upload and one wallet payment. `Stored` mode (no
 # compression) keeps each inner file byte-identical to its original.
 zip = { version = "2", default-features = false }
-# Chainmark v1 (docs/chainmark-format-v1.md): EIP-191 personal_sign for
-# internal-mode wallets. WalletConnect mode uses AppKit's provider in
-# JS, so this is only the internal half. `k256` + `sha3` are already
-# in the dep graph transitively via alloy — direct deps keep the
-# version surface explicit.
+# EIP-191 `personal_sign` over the keychain wallet key — drives the
+# private-etch at-rest key derivation. k256 + sha3 are already in the
+# dep graph transitively via alloy; direct deps keep the version
+# surface explicit.
 k256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 sha3 = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["std"] }

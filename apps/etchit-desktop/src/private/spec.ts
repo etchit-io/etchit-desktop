@@ -27,9 +27,9 @@ export const SIGN_MESSAGE_PRIVATE =
 export const SIGN_MESSAGE_PRIVATE_SHA256 =
   "761f194f8756aba672cd7c502a5a3aaf2d4908c5cf9420a702090d4992febc7d";
 
-/** HKDF info for the at-rest AEAD key — distinct from the chainmark
- *  info so the same wallet signature derives a *different* key for
- *  each purpose. */
+/** HKDF info string scoping the at-rest AEAD key. Domain-separates
+ *  the derived key from any other future use of the same wallet
+ *  signature. */
 export const HKDF_INFO_PRIVATE_STORAGE = "etchit-private-storage/v1/data-map-key";
 
 // ── Backup layer ─────────────────────────────────────────────────
