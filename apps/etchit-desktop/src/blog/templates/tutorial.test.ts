@@ -7,6 +7,9 @@ const tinyPng: ImageValue = {
   dataUrl: "data:image/png;base64,iVBORw0KGgo=",
   mimeType: "image/png",
   sizeBytes: 32,
+  width: 1,
+  height: 1,
+  originalSizeBytes: 32,
 };
 
 function state(s: {

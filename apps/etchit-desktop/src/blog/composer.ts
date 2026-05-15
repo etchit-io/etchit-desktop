@@ -47,7 +47,12 @@ export function mountComposer(host: HTMLElement, template: Template): ComposerHa
   };
 }
 
-function renderSlot(slot: Slot): HTMLElement {
+/** Build the DOM for one slot — the wrapper div + the appropriate
+ *  input/textarea/dropzone inside. Wiring happens separately in
+ *  [`wireSlot`]. Exported so the Website composer can reuse the same
+ *  drop zone, image processor, drag/zoom — every primitive — for its
+ *  per-page slot fields. */
+export function renderSlot(slot: Slot): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = `composer-slot composer-${slot.kind} slot-${slot.id}`;
   wrap.dataset.slotId = slot.id;
@@ -110,7 +115,10 @@ function renderSlot(slot: Slot): HTMLElement {
   return wrap;
 }
 
-function wireSlot(
+/** Attach input handlers to a slot built by [`renderSlot`]. Updates
+ *  the supplied state map in place and calls `notify` on every change.
+ *  Exported so the Website composer can wire the same primitives. */
+export function wireSlot(
   el: HTMLElement,
   slot: Slot,
   state: Record<string, SlotValue | null>,
@@ -239,13 +247,16 @@ function wireImageSlot(
   });
 }
 
-function hasValue(v: SlotValue | null): boolean {
+/** Whether a slot has user-entered content. Exposed for reuse. */
+export function hasValue(v: SlotValue | null): boolean {
   if (v === null) return false;
   if (v.kind === "image") return true;
   return v.value.trim().length > 0;
 }
 
-function sumImageBytes(state: Record<string, SlotValue | null>): number {
+/** Total bytes across every image-kind slot in a state map. Exposed
+ *  for reuse by the Website composer's aggregate sizing. */
+export function sumImageBytes(state: Record<string, SlotValue | null>): number {
   let sum = 0;
   for (const v of Object.values(state)) {
     if (v?.kind === "image") sum += v.image.sizeBytes;
