@@ -12,8 +12,11 @@
     "test:run": "vitest run"
   },
   "dependencies": {
+    "@reown/appkit": "^1.8.19",
+    "@reown/appkit-adapter-ethers": "^1.8.19",
     "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2.7.1"
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "ethers": "^6.16.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

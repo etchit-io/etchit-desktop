@@ -11,6 +11,7 @@ mod blog;
 mod etch;
 mod history;
 mod secrets;
+mod wallet;
 
 /// Hand a freshly-etched `autonomi://<addr>` URL to the OS scheme handler
 /// (fetch>it desktop if installed). We shell out to the platform opener
@@ -61,6 +62,11 @@ pub fn run() {
             history::history_append,
             history::history_delete,
             history::history_clear,
+            wallet::internal_wallet_info,
+            wallet::prepare_public_etch,
+            wallet::prepare_public_etch_text,
+            wallet::prepare_public_etch_file,
+            wallet::finalize_public_etch,
             open_in_fetchit,
         ])
         .run(tauri::generate_context!())

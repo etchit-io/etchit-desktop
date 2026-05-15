@@ -5,6 +5,9 @@ import { mountComposer } from "../blog/composer";
 import { mountTemplatePicker } from "../blog/templatePicker";
 import type { BlogPalette, EditorState, Template } from "../blog/types";
 import { historyAppendBestEffort } from "../history/store";
+import { mountActiveWalletBanner } from "../wallet/activeBanner";
+import { uploadBytesViaWallet } from "../wallet/externalUpload";
+import { loadWalletMode } from "../wallet/mode";
 
 const SIZE_WARN_BYTES = 4 * 1024 * 1024;
 const READ_WORDS_PER_MINUTE = 200;
@@ -86,6 +89,7 @@ function renderComposer(
       <div class="blog-edit-meta">
         <p class="blog-edit-size">No images yet.</p>
         <p class="blog-edit-words"></p>
+        <p class="wallet-active-banner blog-edit-wallet-banner"></p>
       </div>
       <div class="blog-edit-buttons">
         <button type="button" class="blog-edit-preview" disabled title="Preview (⌘P)">Preview</button>
@@ -115,6 +119,8 @@ function renderComposer(
   const previewEtchBtn = root.querySelector(".blog-edit-preview-etch") as HTMLButtonElement;
   const sizeEl = root.querySelector(".blog-edit-size") as HTMLElement;
   const wordsEl = root.querySelector(".blog-edit-words") as HTMLElement;
+  const bannerEl = root.querySelector(".blog-edit-wallet-banner") as HTMLElement;
+  mountActiveWalletBanner(bannerEl);
   const previewBtn = root.querySelector(".blog-edit-preview") as HTMLButtonElement;
   const etchBtn = root.querySelector(".blog-edit-etch") as HTMLButtonElement;
   const switchBtn = root.querySelector(".blog-edit-switch") as HTMLButtonElement;
@@ -241,24 +247,36 @@ function renderComposer(
       return;
     }
 
-    void invoke<string>("etch_html", { html }).then(
-      (address) => {
-        state.status = "idle";
-        refresh();
-        previewEtchBtn.disabled = false;
-        previewEtchBtn.textContent = "Etch";
-        closePreview();
-        showResult(resultEl, errorEl, address);
-        historyAppendBestEffort(address, blogLabel(composer.getState(), template), "blog");
-      },
-      (e) => {
-        state.status = "idle";
-        refresh();
-        previewEtchBtn.disabled = false;
-        previewEtchBtn.textContent = "Etch";
-        showError(errorEl, resultEl, String(e));
-      },
-    );
+    const onAddress = (address: string): void => {
+      state.status = "idle";
+      refresh();
+      previewEtchBtn.disabled = false;
+      previewEtchBtn.textContent = "Etch";
+      closePreview();
+      showResult(resultEl, errorEl, address);
+      historyAppendBestEffort(address, blogLabel(composer.getState(), template), "blog");
+    };
+    const onFail = (e: unknown): void => {
+      state.status = "idle";
+      refresh();
+      previewEtchBtn.disabled = false;
+      previewEtchBtn.textContent = "Etch";
+      showError(errorEl, resultEl, String(e));
+    };
+
+    if (loadWalletMode() === "external") {
+      const setStatus = (msg: string): void => {
+        previewEtchBtn.textContent = msg;
+        etchBtn.textContent = msg;
+      };
+      void uploadBytesViaWallet(new TextEncoder().encode(html), setStatus).then(
+        (r) => onAddress(r.address),
+        onFail,
+      );
+      return;
+    }
+
+    void invoke<string>("etch_html", { html }).then(onAddress, onFail);
   };
 
   etchBtn.addEventListener("click", doEtch);

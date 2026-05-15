@@ -4,6 +4,9 @@ import { mountSiteComposer, type SiteComposerHandle } from "../website/composer"
 import { mountSiteTemplatePicker } from "../website/templatePicker";
 import type { BlogPalette } from "../blog/types";
 import { historyAppendBestEffort } from "../history/store";
+import { mountActiveWalletBanner } from "../wallet/activeBanner";
+import { uploadBytesViaWallet } from "../wallet/externalUpload";
+import { loadWalletMode } from "../wallet/mode";
 import type { SiteEditorState, SiteTemplate } from "../website/types";
 
 const SIZE_WARN_BYTES = 4 * 1024 * 1024;
@@ -78,6 +81,7 @@ function renderComposer(
         <p class="site-edit-size">No images yet.</p>
         <p class="site-edit-words"></p>
         <p class="site-edit-missing" hidden></p>
+        <p class="wallet-active-banner site-edit-wallet-banner"></p>
       </div>
       <div class="site-edit-buttons">
         <button type="button" class="site-edit-preview" disabled title="Preview (⌘P)">Preview</button>
@@ -108,6 +112,8 @@ function renderComposer(
   const sizeEl = root.querySelector(".site-edit-size") as HTMLElement;
   const wordsEl = root.querySelector(".site-edit-words") as HTMLElement;
   const missingEl = root.querySelector(".site-edit-missing") as HTMLElement;
+  const bannerEl = root.querySelector(".site-edit-wallet-banner") as HTMLElement;
+  mountActiveWalletBanner(bannerEl);
   const previewBtn = root.querySelector(".site-edit-preview") as HTMLButtonElement;
   const etchBtn = root.querySelector(".site-edit-etch") as HTMLButtonElement;
   const switchBtn = root.querySelector(".site-edit-switch") as HTMLButtonElement;
@@ -267,24 +273,36 @@ function renderComposer(
       return;
     }
 
-    void invoke<string>("etch_html", { html }).then(
-      (address) => {
-        state.status = "idle";
-        refresh();
-        previewEtchBtn.disabled = false;
-        previewEtchBtn.textContent = "Etch";
-        closePreview();
-        showResult(resultEl, errorEl, address);
-        historyAppendBestEffort(address, siteLabel(composer.getState(), template), "site");
-      },
-      (e) => {
-        state.status = "idle";
-        refresh();
-        previewEtchBtn.disabled = false;
-        previewEtchBtn.textContent = "Etch";
-        showError(errorEl, resultEl, String(e));
-      },
-    );
+    const onAddress = (address: string): void => {
+      state.status = "idle";
+      refresh();
+      previewEtchBtn.disabled = false;
+      previewEtchBtn.textContent = "Etch";
+      closePreview();
+      showResult(resultEl, errorEl, address);
+      historyAppendBestEffort(address, siteLabel(composer.getState(), template), "site");
+    };
+    const onFail = (e: unknown): void => {
+      state.status = "idle";
+      refresh();
+      previewEtchBtn.disabled = false;
+      previewEtchBtn.textContent = "Etch";
+      showError(errorEl, resultEl, String(e));
+    };
+
+    if (loadWalletMode() === "external") {
+      const setStatus = (msg: string): void => {
+        previewEtchBtn.textContent = msg;
+        etchBtn.textContent = msg;
+      };
+      void uploadBytesViaWallet(new TextEncoder().encode(html), setStatus).then(
+        (r) => onAddress(r.address),
+        onFail,
+      );
+      return;
+    }
+
+    void invoke<string>("etch_html", { html }).then(onAddress, onFail);
   };
 
   etchBtn.addEventListener("click", doEtch);

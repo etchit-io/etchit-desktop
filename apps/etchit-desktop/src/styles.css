@@ -2073,3 +2073,285 @@ body[data-theme="light"] .site-edit-preview-etch { color: #fff; }
   font-size: 1rem !important;
   line-height: 1;
 }
+
+/* ── Wallet tab ────────────────────────────────────────────────────── */
+
+.wallet-tab {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.wallet-header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.8rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.wallet-lede {
+  margin: 0;
+  color: var(--ash);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.wallet-mode-switcher {
+  display: inline-flex;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.2rem;
+  gap: 0.2rem;
+  align-self: flex-start;
+}
+.wallet-mode-tab {
+  background: transparent;
+  border: 0;
+  padding: 0.4rem 1rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--ash);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.wallet-mode-tab:hover { color: var(--fg); }
+.wallet-mode-tab.is-active {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.wallet-mode-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ash);
+  line-height: 1.5;
+}
+
+.wallet-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.wallet-card-loading {
+  color: var(--ash);
+  font-size: 0.92rem;
+  padding: 0.5rem 0;
+}
+.wallet-card-label {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ash);
+}
+.wallet-card-empty {
+  align-items: flex-start;
+}
+.wallet-card-headline {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+.wallet-card-body {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ash);
+  line-height: 1.55;
+}
+.wallet-card-error {
+  border-color: color-mix(in srgb, var(--copper) 50%, var(--line));
+}
+.wallet-card-error-inline {
+  margin: 0.5rem 0 0;
+  font-size: 0.82rem;
+  color: var(--copper);
+}
+
+.wallet-addr-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.wallet-addr {
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+  font-size: 0.95rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  padding: 0.25rem 0.55rem;
+  border-radius: 6px;
+}
+.wallet-addr-copy {
+  background: transparent;
+  color: var(--ash);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.wallet-addr-copy:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+.wallet-balances {
+  display: flex;
+  gap: 2rem;
+  align-items: baseline;
+  padding: 0.5rem 0;
+}
+.wallet-balance {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+.wallet-balance-amount {
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.wallet-balance-symbol {
+  font-size: 0.85rem;
+  color: var(--ash);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.wallet-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ash);
+  line-height: 1.55;
+}
+
+.wallet-refresh,
+.wallet-manage,
+.wallet-empty-action {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--ash);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.45rem 0.85rem;
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.wallet-empty-action {
+  background: var(--copper);
+  color: var(--bg);
+  border-color: var(--copper);
+  font-weight: 500;
+}
+.wallet-empty-action:hover {
+  background: var(--copper-bright);
+  border-color: var(--copper-bright);
+}
+.wallet-refresh:hover,
+.wallet-manage:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+.wallet-link {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: inherit;
+  color: var(--copper);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.wallet-link:hover { color: var(--copper-bright); }
+
+/* ── Top-bar wallet pill ───────────────────────────────────────────── */
+
+#wallet-pill {
+  /* Sits at the far right of the bar — left margin absorbs the gap to
+     the tab strip; flex-shrink keeps it from collapsing on narrow windows. */
+  margin-left: auto;
+  align-self: center;
+  flex-shrink: 0;
+}
+.wallet-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.7rem 0.3rem 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  user-select: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--fg);
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.wallet-pill:hover { border-color: var(--copper); }
+.wallet-pill:focus-visible {
+  outline: 2px solid var(--copper);
+  outline-offset: 2px;
+}
+.wallet-pill-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: var(--copper);
+  color: var(--bg);
+}
+.wallet-pill[data-state="empty"] .wallet-pill-badge {
+  background: transparent;
+  color: var(--ash);
+  border: 1px solid var(--ash);
+}
+.wallet-pill-addr { font-weight: 500; }
+.wallet-pill-empty { color: var(--ash); font-style: italic; }
+
+/* ── Upload tabs: "Etching as…" inline footer ────────────────────────
+   Small line above the Etch button on Etch / Blogger / Website that
+   confirms which wallet will sign. Click the link to switch. */
+
+.wallet-active-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--ash);
+  margin: 0;
+}
+.wallet-active-banner strong {
+  color: var(--fg);
+  font-weight: 500;
+}
+.wallet-active-link {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: inherit;
+  color: var(--copper);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.wallet-active-link:hover { color: var(--copper-bright); }

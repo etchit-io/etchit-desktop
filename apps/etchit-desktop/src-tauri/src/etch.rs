@@ -38,9 +38,22 @@ const NO_KEY_HINT: &str =
 
 /// Long-lived `Client` cache. The `Default` impl gives us an empty
 /// cache; the first etch populates it.
+///
+/// Two slots, because the two wallet modes can't share a `Client`:
+///
+/// * `internal`: built via [`Client::connect_with_wallet`] using the
+///   keychain key. Used by the existing `data_put_public` /
+///   `file_upload_public` upload path. Cached by SHA256 fingerprint
+///   of the key so rotating the key invalidates the entry.
+/// * `external`: built via [`Client::connect`] with no wallet. Used
+///   by the WalletConnect / external-signer flow — the user's wallet
+///   pays for storage, the client only handles `prepare_public_upload`
+///   and `finalize_public_upload`. Cached as a single instance per
+///   process; no key fingerprint applies.
 #[derive(Default)]
 pub struct EtchState {
     cached: Mutex<Option<(Arc<Client>, [u8; 32])>>,
+    pub(crate) external: Mutex<Option<Arc<Client>>>,
 }
 
 /// Wrap `title` + `body` in the etch/it envelope JSON and upload as
@@ -69,6 +82,22 @@ pub async fn etch_file(state: State<'_, EtchState>, path: String) -> Result<Stri
         .await
         .map_err(|e| format!("upload failed: {e}"))?;
     Ok(result.address)
+}
+
+/// Build (or return cached) walletless client used by the external-signer
+/// flow. No key required — the user signs the payment tx in their wallet.
+pub(crate) async fn get_or_build_external_client(
+    state: &EtchState,
+) -> Result<Arc<Client>, String> {
+    let mut guard = state.external.lock().await;
+    if let Some(client) = guard.as_ref() {
+        return Ok(client.clone());
+    }
+    let client = Client::connect(Vec::new())
+        .await
+        .map_err(|e| format!("client init failed: {e}"))?;
+    *guard = Some(client.clone());
+    Ok(client)
 }
 
 pub(crate) async fn get_or_build_client(state: &EtchState) -> Result<Arc<Client>, String> {

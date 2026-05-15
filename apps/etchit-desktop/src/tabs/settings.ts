@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { KEYCHAIN_CHANGED_EVENT } from "../wallet/statusPill";
+
+function announceKeychainChange(): void {
+  window.dispatchEvent(new CustomEvent(KEYCHAIN_CHANGED_EVENT));
+}
+
 import { normalizeSecretKey } from "../etch/secretKey";
 import { applyTheme, loadTheme, type Theme } from "../theme/theme";
 
@@ -162,6 +168,7 @@ function mountAdvanced(host: HTMLElement): void {
         storeBtn.textContent = "Store key";
         refreshStoreEnabled();
         setStatusStored();
+        announceKeychainChange();
       },
       (e) => {
         storeBtn.textContent = "Store key";
@@ -179,6 +186,7 @@ function mountAdvanced(host: HTMLElement): void {
         clearBtn.textContent = "Clear stored key";
         clearBtn.disabled = false;
         setStatusEmpty();
+        announceKeychainChange();
       },
       (e) => {
         clearBtn.textContent = "Clear stored key";

@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
 import { historyAppendBestEffort } from "../history/store";
+import { mountActiveWalletBanner } from "../wallet/activeBanner";
+import { uploadFileViaWallet, uploadTextViaWallet } from "../wallet/externalUpload";
+import { loadWalletMode } from "../wallet/mode";
 
 type Mode = "text" | "file";
 
@@ -44,6 +47,7 @@ export function mountEtch(host: HTMLElement): void {
         </div>
       </section>
 
+      <p class="wallet-active-banner etch-wallet-banner"></p>
       <button type="button" class="etch-submit" disabled>Etch</button>
 
       <div class="etch-result" hidden role="status" aria-live="polite"></div>
@@ -58,9 +62,12 @@ export function mountEtch(host: HTMLElement): void {
   const titleEl = $<HTMLInputElement>("#etch-title");
   const bodyEl = $<HTMLTextAreaElement>("#etch-body");
   const pickedEl = $<HTMLParagraphElement>(".etch-picked");
+  const bannerEl = $<HTMLParagraphElement>(".etch-wallet-banner");
   const submitEl = $<HTMLButtonElement>(".etch-submit");
   const resultEl = $<HTMLDivElement>(".etch-result");
   const errorEl = $<HTMLDivElement>(".etch-error");
+
+  mountActiveWalletBanner(bannerEl);
 
   function setMode(m: Mode): void {
     state.mode = m;
@@ -168,6 +175,28 @@ export function mountEtch(host: HTMLElement): void {
       refreshSubmit();
       showError(msg);
     };
+
+    const walletMode = loadWalletMode();
+    const setStatus = (msg: string): void => {
+      submitEl.textContent = msg;
+    };
+
+    if (walletMode === "external") {
+      if (state.mode === "text") {
+        void uploadTextViaWallet(titleEl.value, bodyEl.value, setStatus).then(
+          (r) => done(r.address),
+          (e) => fail(String(e)),
+        );
+      } else if (state.pickedPath) {
+        void uploadFileViaWallet(state.pickedPath, setStatus).then(
+          (r) => done(r.address),
+          (e) => fail(String(e)),
+        );
+      } else {
+        fail("no file selected");
+      }
+      return;
+    }
 
     if (state.mode === "text") {
       void invoke<string>("etch_text", { title: titleEl.value, body: bodyEl.value }).then(done, (e) => fail(String(e)));
