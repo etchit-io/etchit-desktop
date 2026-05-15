@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ComposerHandle } from "../blog/composer";
 import { mountComposer } from "../blog/composer";
 import { mountTemplatePicker } from "../blog/templatePicker";
-import type { BlogPalette, Template } from "../blog/types";
+import type { BlogPalette, EditorState, Template } from "../blog/types";
+import { historyAppendBestEffort } from "../history/store";
 
 const SIZE_WARN_BYTES = 4 * 1024 * 1024;
 const READ_WORDS_PER_MINUTE = 200;
@@ -248,6 +249,7 @@ function renderComposer(
         previewEtchBtn.textContent = "Etch";
         closePreview();
         showResult(resultEl, errorEl, address);
+        historyAppendBestEffort(address, blogLabel(composer.getState(), template), "blog");
       },
       (e) => {
         state.status = "idle";
@@ -311,4 +313,20 @@ function formatBytes(n: number): string {
 
 function escapeAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+// First text-kind slot is the conventional "title" across templates. Fall
+// back to the template name if none is filled — keeps the History row
+// readable even for image-led templates with no headline.
+function blogLabel(state: EditorState, template: Template): string {
+  for (const slot of template.slots) {
+    if (slot.kind === "text" || slot.kind === "longtext") {
+      const value = state.slots[slot.id];
+      if (value && (value.kind === "text" || value.kind === "longtext") && value.value.trim()) {
+        const line = value.value.trim().split("\n")[0]?.trim() ?? "";
+        return line.length > 80 ? `${line.slice(0, 77)}…` : line;
+      }
+    }
+  }
+  return template.name;
 }

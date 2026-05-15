@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { mountSiteComposer, type SiteComposerHandle } from "../website/composer";
 import { mountSiteTemplatePicker } from "../website/templatePicker";
 import type { BlogPalette } from "../blog/types";
-import type { SiteTemplate } from "../website/types";
+import { historyAppendBestEffort } from "../history/store";
+import type { SiteEditorState, SiteTemplate } from "../website/types";
 
 const SIZE_WARN_BYTES = 4 * 1024 * 1024;
 const READ_WORDS_PER_MINUTE = 200;
@@ -274,6 +275,7 @@ function renderComposer(
         previewEtchBtn.textContent = "Etch";
         closePreview();
         showResult(resultEl, errorEl, address);
+        historyAppendBestEffort(address, siteLabel(composer.getState(), template), "site");
       },
       (e) => {
         state.status = "idle";
@@ -337,4 +339,19 @@ function formatBytes(n: number): string {
 
 function escapeAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+// Prefer a site-level text slot (the conventional "siteName"). Falls
+// back to the template name so image-led templates still get a row.
+function siteLabel(state: SiteEditorState, template: SiteTemplate): string {
+  for (const slot of template.siteSlots) {
+    if (slot.kind === "text" || slot.kind === "longtext") {
+      const value = state.site[slot.id];
+      if (value && (value.kind === "text" || value.kind === "longtext") && value.value.trim()) {
+        const line = value.value.trim().split("\n")[0]?.trim() ?? "";
+        return line.length > 80 ? `${line.slice(0, 77)}…` : line;
+      }
+    }
+  }
+  return template.name;
 }

@@ -9,6 +9,7 @@
 
 mod blog;
 mod etch;
+mod history;
 mod secrets;
 
 /// Hand a freshly-etched `autonomi://<addr>` URL to the OS scheme handler
@@ -56,6 +57,10 @@ pub fn run() {
             secrets::store_secret_key,
             secrets::clear_secret_key,
             secrets::has_secret_key,
+            history::history_load,
+            history::history_append,
+            history::history_delete,
+            history::history_clear,
             open_in_fetchit,
         ])
         .run(tauri::generate_context!())

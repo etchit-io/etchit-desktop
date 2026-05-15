@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
+import { historyAppendBestEffort } from "../history/store";
+
 type Mode = "text" | "file";
 
 interface State {
@@ -154,6 +156,12 @@ export function mountEtch(host: HTMLElement): void {
       state.status = "idle";
       refreshSubmit();
       showResult(address);
+      if (state.mode === "text") {
+        const label = titleEl.value.trim() || firstLine(bodyEl.value) || "Untitled text";
+        historyAppendBestEffort(address, label, "text");
+      } else {
+        historyAppendBestEffort(address, state.pickedLabel ?? "File", "file");
+      }
     };
     const fail = (msg: string): void => {
       state.status = "idle";
@@ -169,4 +177,9 @@ export function mountEtch(host: HTMLElement): void {
       fail("no file selected");
     }
   });
+}
+
+function firstLine(body: string): string {
+  const line = body.split("\n").map((s) => s.trim()).find((s) => s.length > 0) ?? "";
+  return line.length > 80 ? `${line.slice(0, 77)}…` : line;
 }
