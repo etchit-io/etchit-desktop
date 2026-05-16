@@ -653,11 +653,21 @@ async function dataMapFor(entry: PrivateEntry): Promise<string> {
     const blob = Uint8Array.from(
       await invoke<number[]>("fetch_public_bytes", { address: entry.enc_data_map_addr }),
     );
-    const plaintext = await decryptBlob(blob, password);
+    let plaintext = await decryptBlob(blob, password);
     if (plaintext == null) {
-      throw new Error(
-        "couldn't decrypt — wrong password, or the network blob has been tampered with",
-      );
+      // The cached passphrase didn't unlock this blob — either the
+      // entry was etched in an earlier session under a different
+      // passphrase, or it was imported from a backup using one. Give
+      // the user one ad-hoc retry without touching the keychain
+      // (other entries may still need the cached one).
+      const alt = await openPasswordModal("enter");
+      if (!alt) throw new Error("password required to decrypt this entry");
+      plaintext = await decryptBlob(blob, alt);
+      if (plaintext == null) {
+        throw new Error(
+          "couldn't decrypt — wrong passphrase, or the network blob has been tampered with",
+        );
+      }
     }
     return new TextDecoder().decode(plaintext);
   }
@@ -929,10 +939,14 @@ async function importLibrary(
     flash("Wrong passphrase, or this isn't an etchit backup file.");
     return;
   }
-  // The backup passphrase IS the library passphrase — every entry's
-  // data-map blob was encrypted with it. Promote it to the session
-  // so restored entries open without a second prompt.
-  setSessionPassword(password);
+  // Promote the backup passphrase to the session only when there
+  // isn't one already — otherwise we'd silently overwrite the user's
+  // working library passphrase and orphan their existing entries.
+  // For mismatched cases the user will be prompted per-entry on
+  // first open (see dataMapFor's one-shot retry).
+  if (currentPassword() === null) {
+    setSessionPassword(password);
+  }
 
   let parsed: { entries?: unknown };
   try {
