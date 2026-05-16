@@ -7,28 +7,34 @@ code it points at) should be able to pick up without losing context.
 
 ## Where we are
 
-Scaffold landed: `apps/etchit-desktop/`. Six-tab UI, three themes,
-empty placeholder per tab except Settings, no functional uploads yet.
-10 vitest pass (`theme/theme.test.ts`, `ui/tabBar.test.ts`).
+All seven tabs shipped and functional. Three themes. Internal-wallet
+(OS-keychain key) and WalletConnect (AppKit-on-Reown) both wired
+across every upload flow. Private etches encrypted with a
+keychain-persisted passphrase; encrypted data-map blobs go out as
+public Autonomi etches so the library is portable cross-device with
+just `(blob-address, passphrase)`. Idle disconnect, Settings theme +
+About + wallet-key + passphrase, history backed by `history.json`,
+private library backed by `private_store.json` plus a passphrase-
+protected backup file. CI builds signed APKs on `v*` tags.
 
 ```
 apps/etchit-desktop/
 ├── index.html
 ├── package.json / vite.config.ts / tsconfig.json
-├── src-tauri/                       Tauri 2 backend, no commands yet
+├── src-tauri/                       Tauri 2 — etch, wallet, private,
+│                                    history, secrets, blog commands
 └── src/
     ├── main.ts / controller.ts
     ├── types.ts                     TabId
     ├── styles.css                   3 themes via body[data-theme]
-    ├── theme/                       load/apply/persist (localStorage)
-    ├── ui/tabBar.ts                 top-bar tab strip
-    └── tabs/
-        ├── etch.ts                  placeholder — next to implement
-        ├── blogger.ts               placeholder
-        ├── website.ts               placeholder — desktop-only
-        ├── history.ts               placeholder
-        ├── wallet.ts                placeholder
-        └── settings.ts              theme picker + about, functional
+    ├── theme/                       load / apply / persist (localStorage)
+    ├── ui/                          tab strip, modals, status pill
+    ├── wallet/                      AppKit + internal-key paths
+    ├── blog/ / website/             template + composer per tab
+    ├── private/                     password modal, cipher blob,
+    │                                session (keychain-persisted)
+    ├── history/                     store + format
+    └── tabs/                        one file per tab, mounted lazily
 ```
 
 ## Tab build-out order
@@ -36,14 +42,15 @@ apps/etchit-desktop/
 Smallest first, each unblocks the next. Each shipped with its own
 tests in the same commit (the rule from CLAUDE.md / feedback memory).
 
-| # | Tab | What it does | Wallet needed? |
+| # | Tab | What it does | Wallet |
 |---|---|---|---|
-| 1 | **Etch** ✓ | Paste text or drop a file → returns an `autonomi://` address. The smallest possible upload UI. V0: native via `ant-ffi` path dep (same crate Android binds to), wallet key from OS keychain, `data_put_public` for text and `file_upload_public` for files. Neutral envelope, native file picker, result panel with Copy + Open-in-fetch>it. Long-lived `Client` cached in Tauri State so subsequent etches skip the ~10 s bootstrap warmup. | V0: paste hex key into Settings → Advanced → OS keychain. V1: WalletConnect Modal Web swaps the paste path for the external-signer flow (`prepare_public_upload` + `finalize_public_upload`, mirroring `EtchSigner.kt`) |
-| 2 | **Blogger** | Title + body composer → publishes a self-contained HTML page following `docs/upload-neutrality.md` (no etch/it strings in the bytes). Parallel of `BlogHtml.kt` on Android | Same backend as Etch — `ant-ffi` direct, key from keychain |
-| 3 | **History** | Local-only log of past etches (address + label + cost + timestamp), persisted in `settings.json`. No network calls; lives off what the upload tabs record at success time | None — local only |
-| 4 | **Wallet** | Status panel: balance, approval budget, connection. WalletConnect Modal Web (browser-style SDK loaded in the Tauri WebView) | This is where wallet becomes native (replaces the shell-out path) |
-| 5 | **Website** | Multi-file site builder. Drop a folder; etchit emits one entry-point address. Desktop-only by design — heavy file handling doesn't fit a phone | Native wallet by this point |
-| 6 | **Settings** | Already functional in V0 (theme picker + about). Expand as other tabs need persistent prefs | None |
+| 1 | **Etch** ✓ | Text or file → returns an `autonomi://` address. `ant-ffi` direct (same crate Android binds to), bundling for ≥2 picks or folders becomes a ZIP. Required user Title field stored only in local `history.json`; the uploaded bytes carry zero etch/it identification. Long-lived `Client` cached in Tauri State so subsequent etches skip the ~10 s bootstrap warmup | Internal (paste-key keychain) or WalletConnect (AppKit external-signer) |
+| 2 | **Blogger** ✓ | Title + body composer → self-contained HTML following `docs/upload-neutrality.md`. Same upload path as Etch | Internal or WalletConnect |
+| 3 | **Website** ✓ | **Template-based single-HTML builder** (landing / personal / portfolio). Composer slots → preview iframe → etch as one neutral HTML doc with assets inlined as data URIs. Originally planned as folder-drop ZIP; templates better fit the idiot-proof UX target. ⌘P preview, ⌘↩ etch | Internal or WalletConnect |
+| 4 | **Private** ✓ | Password-encrypted etches. Each entry's data-map is encrypted with a session passphrase + uploaded to the public network as a separate etch; library stays portable cross-device with `(blob-address, passphrase)`. Session passphrase persists in the OS keychain so subsequent launches don't re-prompt. Backup export wraps the entries JSON under the same passphrase | Internal or WalletConnect |
+| 5 | **History** ✓ | Local-only log (`history.json`). Per-row Copy / Open-in-fetchit / Delete; clear-all confirmed via plugin-dialog | None |
+| 6 | **Wallet** ✓ | Mode switcher (Internal / WalletConnect). Internal shows derived address + ANT/ETH on Arbitrum One; WalletConnect connects via AppKit and exposes the manage sheet | Both modes implemented |
+| 7 | **Settings** ✓ | Theme picker, bootstrap-peer override (advanced), wallet-key paste (advanced), private-passphrase status + clear (advanced), About | None |
 
 ## UX principles
 
@@ -103,6 +110,10 @@ inconsistency; it's a transitional middle, not a destination.
 
 ## Open questions
 
-- **WalletConnect Modal Web in a Tauri WebView**: how does the modal dialog flow work when the WebView is the *only* window? Probably fine (the modal mounts in the same DOM), but to verify when Wallet tab is implemented.
-- **Website-builder file format**: does the multi-file site go up as a ZIP (and fetch>it unpacks at render time), or as N individual addresses with one entry-point address pointing at a manifest? Decide when the tab is real.
-- **History persistence shape**: `settings.json` is the obvious place but mixing user history with config feels wrong. Probably a separate `history.json` once the History tab is real.
+- **WalletConnect Modal Web in a Tauri WebView**: AppKit loads and signs successfully in the WebView; the open question now is real-world reliability — wallet-popup focus restore, deep-link return from mobile wallets, and disconnect handling under prolonged sessions. Worth a deliberate end-to-end pass before any public release.
+- **Pre-persistence orphaned private etches**: until the keychain-persisted session passphrase landed, each app launch could generate a new passphrase, so older private etches in any given user's library may be encrypted with different transient passphrases. `dataMapFor` has a one-shot retry modal for opening these per-entry, but there's no "scan & sort by passphrase" recovery tool.
+
+## Resolved
+
+- **Website-builder file format**: settled as single-HTML templates with inline assets, not folder-drop ZIP.
+- **History persistence shape**: separate `history.json` in the app data dir; tab is fully shipped.
