@@ -184,7 +184,7 @@ function renderExternal(host: HTMLElement): void {
           <p class="wallet-card-headline">No wallet connected.</p>
           <p class="wallet-card-body">
             Connect a mobile or extension wallet. Every etch will pop a
-            signing prompt — etch/it never sees your private key.
+            signing prompt — etch<span class="brand-mark">/</span>it never sees your private key.
           </p>
           <button type="button" class="wallet-empty-action wallet-connect-btn">Connect wallet</button>
         </div>

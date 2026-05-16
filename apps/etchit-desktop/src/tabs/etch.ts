@@ -32,10 +32,6 @@ export function mountEtch(host: HTMLElement): void {
     <div class="etch-tab">
       <header class="etch-header">
         <h1>Etch</h1>
-        <p class="etch-lede">
-          Publish to Autonomi. Reads are free; etches cost a small amount of ANT.
-          Uploads are neutral — only your content goes to the network.
-        </p>
       </header>
 
       <div class="etch-modes" role="tablist" aria-label="What to etch">
@@ -188,7 +184,7 @@ export function mountEtch(host: HTMLElement): void {
       <code class="etch-result-addr"></code>
       <div class="etch-result-actions">
         <button type="button" class="etch-result-copy">Copy address</button>
-        <button type="button" class="etch-result-open">Open in fetch&gt;it</button>
+        <button type="button" class="etch-result-open">Open in fetch<span class="brand-mark">&gt;</span>it</button>
       </div>
     `;
     (resultEl.querySelector(".etch-result-addr") as HTMLElement).textContent = address;

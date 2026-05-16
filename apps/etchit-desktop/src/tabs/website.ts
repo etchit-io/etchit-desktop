@@ -318,7 +318,7 @@ function showResult(resultEl: HTMLElement, errorEl: HTMLElement, address: string
     <code class="site-edit-result-addr"></code>
     <div class="site-edit-result-actions">
       <button type="button" class="site-edit-result-copy">Copy address</button>
-      <button type="button" class="site-edit-result-open">Open in fetch&gt;it</button>
+      <button type="button" class="site-edit-result-open">Open in fetch<span class="brand-mark">&gt;</span>it</button>
     </div>
   `;
   (resultEl.querySelector(".site-edit-result-addr") as HTMLElement).textContent = address;

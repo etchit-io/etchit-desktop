@@ -89,7 +89,7 @@ export function mountHistory(host: HTMLElement): void {
       </div>
       <div class="history-row-actions">
         <button type="button" class="history-row-copy" title="Copy address">Copy</button>
-        <button type="button" class="history-row-open" title="Open in fetch>it">Open</button>
+        <button type="button" class="history-row-open" title="Open in fetchit">Open</button>
         <button type="button" class="history-row-delete" title="Remove from history" aria-label="Remove from history">×</button>
       </div>
     `;
