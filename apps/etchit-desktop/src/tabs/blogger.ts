@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { ask } from "@tauri-apps/plugin-dialog";
 
 import type { ComposerHandle } from "../blog/composer";
 import { mountComposer } from "../blog/composer";
@@ -218,13 +219,17 @@ function renderComposer(
   setActiveKeyHandler(onKey);
 
   switchBtn.addEventListener("click", () => {
-    if (state.composer && state.composer.totalImageBytes() === 0 && !state.composer.isReady()) {
-      onSwitch();
-      return;
-    }
-    if (window.confirm("Switching templates discards what you've typed in this one. Continue?")) {
-      onSwitch();
-    }
+    void (async () => {
+      if (state.composer && state.composer.totalImageBytes() === 0 && !state.composer.isReady()) {
+        onSwitch();
+        return;
+      }
+      const ok = await ask(
+        "Switching templates discards what you've typed in this one. Continue?",
+        { title: "Switch template", kind: "warning" },
+      );
+      if (ok) onSwitch();
+    })();
   });
 
   const doEtch = (): void => {

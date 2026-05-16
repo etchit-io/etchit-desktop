@@ -3,6 +3,7 @@
 // tabs after a successful etch. Nothing here ever hits the network.
 
 import { invoke } from "@tauri-apps/api/core";
+import { ask } from "@tauri-apps/plugin-dialog";
 
 import {
   HISTORY_CHANGED_EVENT,
@@ -125,17 +126,21 @@ export function mountHistory(host: HTMLElement): void {
   };
 
   clearBtn.addEventListener("click", () => {
-    if (!window.confirm("Remove every entry from this list? The addresses stay on the network.")) {
-      return;
-    }
-    void historyClear().then(
-      () => {
-        state.entries = [];
-        render();
-        flashStatus("History cleared.");
-      },
-      (e: unknown) => flashStatus(formatErr(e)),
-    );
+    void (async () => {
+      const ok = await ask(
+        "Remove every entry from this list? The addresses stay on the network.",
+        { title: "Clear history", kind: "warning" },
+      );
+      if (!ok) return;
+      void historyClear().then(
+        () => {
+          state.entries = [];
+          render();
+          flashStatus("History cleared.");
+        },
+        (e: unknown) => flashStatus(formatErr(e)),
+      );
+    })();
   });
 
   const refresh = (): void => {

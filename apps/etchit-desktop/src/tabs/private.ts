@@ -12,7 +12,7 @@
 // `private_etches.json` and the entry shows up in the library below.
 
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { ask, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import { relativeTime } from "../history/format";
 import {
@@ -394,22 +394,22 @@ export function mountPrivate(host: HTMLElement): void {
     (li.querySelector(".private-row-delete") as HTMLButtonElement).addEventListener(
       "click",
       () => {
-        if (
-          !window.confirm(
+        void (async () => {
+          const ok = await ask(
             `Delete "${entry.title || "Untitled"}" from this device? The chunks stay on the network but you'll have no way to fetch them without the data-map.`,
-          )
-        ) {
-          return;
-        }
-        void privateDelete(entry.id).then(
-          (next) => {
-            state.entries = next;
-            state.expanded.delete(entry.id);
-            renderEntries();
-            flashLibrary("Removed.");
-          },
-          (e) => flashLibrary(`Couldn't delete: ${formatErr(e)}`),
-        );
+            { title: "Delete entry", kind: "warning" },
+          );
+          if (!ok) return;
+          void privateDelete(entry.id).then(
+            (next) => {
+              state.entries = next;
+              state.expanded.delete(entry.id);
+              renderEntries();
+              flashLibrary("Removed.");
+            },
+            (e) => flashLibrary(`Couldn't delete: ${formatErr(e)}`),
+          );
+        })();
       },
     );
     return li;
