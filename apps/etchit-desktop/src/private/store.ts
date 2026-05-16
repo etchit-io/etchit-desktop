@@ -11,15 +11,15 @@ export type PrivateKind = "text" | "file";
 export interface PrivateEntry {
   id: string;
   title: string;
-  /** Legacy plaintext data-map (hex). Empty on new cipher-form
-   *  entries; readers prefer `cipher_data_map` when present. */
+  /** Legacy plaintext data-map (hex). Empty on entries written
+   *  after the password-encryption rewrite; readers prefer
+   *  `enc_data_map_addr` when present. */
   data_map: string;
-  /** AES-256-GCM-wrapped data-map (hex `iv || ct || tag`). Decrypts
-   *  with the wallet-derived storage key keyed by `owner_id`. */
-  cipher_data_map?: string;
-  /** Wallet identity that owns the at-rest key. `0x…` for external
-   *  mode, `keychain:0x…` for internal mode. */
-  owner_id?: string;
+  /** Public Autonomi address (64-hex) of the password-encrypted
+   *  data-map blob. Fetch + decrypt with the session password to
+   *  recover the data-map, then `fetch_private_data` to recover
+   *  the original content. */
+  enc_data_map_addr?: string;
   size_bytes: number;
   wallet_mode: "internal" | "external";
   wallet_address: string;

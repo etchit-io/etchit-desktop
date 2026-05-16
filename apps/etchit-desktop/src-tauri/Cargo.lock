@@ -3136,15 +3136,12 @@ name = "etchit-desktop"
 version = "0.1.0"
 dependencies = [
  "ant-ffi",
- "hex",
- "k256",
  "keyring",
  "saorsa-core",
  "saorsa-transport",
  "serde",
  "serde_json",
  "sha2",
- "sha3 0.10.9",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

@@ -14,7 +14,6 @@ mod history;
 mod private_etch;
 mod private_store;
 mod secrets;
-mod signer;
 mod wallet;
 
 /// Hand a freshly-etched `autonomi://<addr>` URL to the OS scheme handler
@@ -60,6 +59,8 @@ pub fn run() {
             etch::etch_file,
             etch::etch_files,
             etch::etch_text,
+            etch::etch_bytes,
+            etch::fetch_public_bytes,
             blog::etch_html,
             secrets::store_secret_key,
             secrets::clear_secret_key,
@@ -69,6 +70,7 @@ pub fn run() {
             history::history_delete,
             history::history_clear,
             wallet::internal_wallet_info,
+            wallet::internal_wallet_address,
             wallet::prepare_public_etch,
             wallet::prepare_public_etch_text,
             wallet::prepare_public_etch_file,
@@ -86,7 +88,6 @@ pub fn run() {
             private_etch::file_size,
             private_etch::is_directory,
             private_etch::read_file_bytes,
-            signer::personal_sign_with_keychain,
             private_store::private_load,
             private_store::private_append,
             private_store::private_delete,

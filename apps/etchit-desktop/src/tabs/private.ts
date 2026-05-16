@@ -29,9 +29,14 @@ import { bindFileDropZone } from "../util/dragDrop";
 import { formatErr } from "../util/error";
 import { backupDecrypt, backupEncrypt } from "../private/backup";
 import { openBackupModal } from "../private/backupModal";
-import { decryptDataMap, encryptDataMap } from "../private/cipherEntry";
-import { getOrDeriveStorageKey } from "../private/storageKey";
+import { decryptBlob, encryptBlob } from "../private/cipherBlob";
+import { openPasswordModal } from "../private/passwordModal";
+import {
+  currentPassword,
+  setSessionPassword,
+} from "../private/passwordSession";
 import { mountActiveWalletBanner } from "../wallet/activeBanner";
+import { uploadBytesViaWallet } from "../wallet/externalUpload";
 import {
   uploadPrivateFileViaWallet,
   uploadPrivateFilesViaWallet,
@@ -113,8 +118,8 @@ export function mountPrivate(host: HTMLElement): void {
             <p class="private-library-hint">Local to this device. Decrypt by tapping an entry.</p>
           </div>
           <div class="private-library-actions">
-            <button type="button" class="private-export-btn" title="Export an encrypted backup">Export…</button>
-            <button type="button" class="private-import-btn" title="Import a backup from another device">Import…</button>
+            <button type="button" class="private-export-btn" title="Encrypt the whole library into a passphrase-protected backup file">Encrypt…</button>
+            <button type="button" class="private-import-btn" title="Restore a passphrase-protected backup from another device">Import…</button>
           </div>
         </header>
         <p class="private-library-status" hidden role="status"></p>
@@ -303,10 +308,10 @@ export function mountPrivate(host: HTMLElement): void {
       </div>
       <div class="private-row-actions">
         <button type="button" class="private-row-open"></button>
-        <button type="button" class="private-row-export" title="Copy data-map for backup">Export</button>
+        <button type="button" class="private-row-save" hidden>Save As…</button>
         <button type="button" class="private-row-delete" aria-label="Delete">×</button>
       </div>
-      <pre class="private-row-content" hidden></pre>
+      <div class="private-row-content" hidden></div>
     `;
     (li.querySelector(".private-row-title") as HTMLElement).textContent =
       entry.title.trim() || "Untitled";
@@ -322,49 +327,54 @@ export function mountPrivate(host: HTMLElement): void {
     );
 
     const openBtn = li.querySelector(".private-row-open") as HTMLButtonElement;
-    openBtn.textContent = kind === "file" ? "Save As…" : "Open";
+    const saveBtn = li.querySelector(".private-row-save") as HTMLButtonElement;
     const content = li.querySelector(".private-row-content") as HTMLElement;
 
-    if (state.expanded.has(entry.id) && kind === "text") {
+    // For files, the "open kind" depends on the original filename's
+    // extension: images / audio / video / pdf can render inline via
+    // blob URLs; everything else gets a Save As… button only so the
+    // user can open it with their OS app of choice.
+    const filename = entry.original_filename ?? entry.title;
+    const previewKind: PreviewKind =
+      kind === "text" ? "text" : detectPreviewKind(filename);
+
+    if (previewKind === "binary") {
+      // No inline preview possible — promote Save As… to the
+      // primary action and hide the now-redundant secondary one.
+      openBtn.textContent = "Save As…";
+      saveBtn.hidden = true;
+    } else {
+      openBtn.textContent = "Open";
+      saveBtn.hidden = kind !== "file"; // text entries don't need a save button
+    }
+
+    if (state.expanded.has(entry.id) && previewKind !== "binary") {
       content.hidden = false;
       content.textContent = "Decrypting…";
-      void decryptText(entry, content);
+      void renderPreview(entry, content, previewKind);
     }
 
     openBtn.addEventListener("click", () => {
-      if (kind === "file") {
+      if (previewKind === "binary") {
         void saveFile(entry, flashLibrary);
         return;
       }
       if (state.expanded.has(entry.id)) {
         state.expanded.delete(entry.id);
         content.hidden = true;
+        content.replaceChildren();
         return;
       }
       state.expanded.add(entry.id);
       content.hidden = false;
       content.textContent = "Decrypting…";
-      void decryptText(entry, content);
+      void renderPreview(entry, content, previewKind);
     });
 
-    (li.querySelector(".private-row-export") as HTMLButtonElement).addEventListener(
-      "click",
-      () => {
-        // Export = clipboard the *plaintext* data-map. Per-entry
-        // export is a recovery hatch: paste it into the CLI or
-        // another client to fetch the encrypted bytes. Needs the
-        // wallet sig to decrypt the at-rest cipher first.
-        void (async () => {
-          try {
-            const dm = await dataMapFor(entry);
-            await navigator.clipboard.writeText(dm);
-            flashLibrary("Data-map copied. Keep it safe.");
-          } catch (e) {
-            flashLibrary(`Couldn't copy: ${formatErr(e)}`);
-          }
-        })();
-      },
-    );
+    saveBtn.addEventListener("click", () => {
+      void saveFile(entry, flashLibrary);
+    });
+
     (li.querySelector(".private-row-delete") as HTMLButtonElement).addEventListener(
       "click",
       () => {
@@ -546,32 +556,30 @@ export function mountPrivate(host: HTMLElement): void {
     title: string;
     original_filename?: string;
   }): Promise<void> => {
-    // At-rest encryption: every new entry gets its data-map wrapped
-    // with the wallet-derived storage key before hitting disk. A
-    // leaked `private_etches.json` is useless without the wallet
-    // signature that derives the same key.
-    let cipher_data_map: string | undefined;
-    let owner_id: string | undefined;
+    // Password-encrypt the data-map and upload the blob to Autonomi
+    // as a public etch. The address (P) is the entry's recovery
+    // handle — anyone with P + the password can decrypt, regardless
+    // of wallet. If something fails along the way we save with
+    // plaintext `data_map` as a fallback so the etch isn't lost.
+    let enc_data_map_addr: string | undefined;
     let fallbackDataMap = "";
     try {
-      const sk = await getOrDeriveStorageKey();
-      cipher_data_map = await encryptDataMap(sk.key, input.data_map);
-      owner_id = sk.ownerId;
+      const password = await ensurePassword();
+      if (!password) throw new Error("password required to encrypt private etch");
+      const dataMapBytes = new TextEncoder().encode(input.data_map);
+      const blob = await encryptBlob(dataMapBytes, password);
+      enc_data_map_addr = await uploadPublicBlob(input.wallet_mode, blob);
     } catch (e) {
-      // Derivation failed (user rejected the sign, no wallet, etc.).
-      // Fall back to plaintext storage — the etch already landed, the
-      // data-map shouldn't be thrown away. Surface a clear warning.
       fallbackDataMap = input.data_map;
       errorEl.hidden = false;
-      errorEl.textContent = `Couldn't derive the at-rest key: ${formatErr(e)}. Saved with plaintext data-map; sign in to encrypt later.`;
+      errorEl.textContent = `Couldn't publish the encrypted data-map: ${formatErr(e)}. Saved with plaintext data-map locally; export to a backup file from below to recover.`;
     }
 
     const entry: PrivateEntry = {
       id: newEntryId(),
       title: input.title,
       data_map: fallbackDataMap,
-      ...(cipher_data_map ? { cipher_data_map } : {}),
-      ...(owner_id ? { owner_id } : {}),
+      ...(enc_data_map_addr ? { enc_data_map_addr } : {}),
       size_bytes: input.size_bytes,
       wallet_mode: input.wallet_mode,
       wallet_address: input.wallet_address,
@@ -609,50 +617,189 @@ export function mountPrivate(host: HTMLElement): void {
 
 /** Resolve the plaintext data-map for an entry. Prefers
  *  `cipher_data_map` (the new shape) and falls back to the legacy
- *  plaintext `data_map` field. Throws on missing-or-corrupt cipher
- *  / wrong-wallet — caller surfaces the right message. */
+ *  plaintext `data_map` field. Throws when the user cancels the
+ *  password prompt, the address doesn't decrypt (wrong password or
+ *  tampered network bytes), or the entry has neither shape. */
 async function dataMapFor(entry: PrivateEntry): Promise<string> {
-  if (entry.cipher_data_map) {
-    const sk = await getOrDeriveStorageKey();
-    const plain = await decryptDataMap(sk.key, entry.cipher_data_map);
-    if (plain == null) {
+  // Entries written by an earlier wallet-sig encryption scheme carry
+  // `cipher_data_map` (in the JSON) with no recovery path under the
+  // new password-only model. Surface a clear message rather than
+  // letting "no data-map" leak through.
+  if ("cipher_data_map" in entry && (entry as { cipher_data_map?: unknown }).cipher_data_map) {
+    throw new Error(
+      "this entry was encrypted with a previous scheme that's no longer supported — re-etch to recover, or delete from the library",
+    );
+  }
+  if (entry.enc_data_map_addr) {
+    const password = await ensurePassword({ purpose: "open" });
+    if (!password) throw new Error("password required to decrypt this entry");
+    const blob = Uint8Array.from(
+      await invoke<number[]>("fetch_public_bytes", { address: entry.enc_data_map_addr }),
+    );
+    const plaintext = await decryptBlob(blob, password);
+    if (plaintext == null) {
       throw new Error(
-        `couldn't decrypt — wallet doesn't match the one that saved this entry (${entry.owner_id ?? "?"})`,
+        "couldn't decrypt — wrong password, or the network blob has been tampered with",
       );
     }
-    return plain;
+    return new TextDecoder().decode(plaintext);
   }
   if (entry.data_map) return entry.data_map;
   throw new Error("entry has no data-map");
 }
 
-async function decryptText(entry: PrivateEntry, el: HTMLElement): Promise<void> {
+/** Returns the session password — prompting via the modal once per
+ *  session. Locks in via `setSessionPassword` only after the caller
+ *  has confirmed it decrypts something (so wrong-password attempts
+ *  don't poison the cache). For etch flows the password is brand
+ *  new (no prior content to verify against); we trust the user's
+ *  modal input and cache it immediately. */
+async function ensurePassword(
+  opts: { purpose?: "etch" | "open" } = {},
+): Promise<string | null> {
+  const cached = currentPassword();
+  if (cached) return cached;
+  const mode = opts.purpose === "open" ? "enter" : "create";
+  const entered = await openPasswordModal(mode);
+  if (entered) setSessionPassword(entered);
+  return entered;
+}
+
+/** Upload an encrypted-data-map blob as a public Autonomi etch.
+ *  Branches on wallet mode the same way the public Etch tab does. */
+async function uploadPublicBlob(
+  walletMode: "internal" | "external",
+  blob: Uint8Array,
+): Promise<string> {
+  if (walletMode === "external") {
+    const r = await uploadBytesViaWallet(blob);
+    return r.address;
+  }
+  return invoke<string>("etch_bytes", { data: Array.from(blob) });
+}
+
+type PreviewKind = "text" | "image" | "audio" | "video" | "pdf" | "binary";
+
+/** Map a filename to the inline-preview strategy. "binary" means we
+ *  can't render it in-app — caller offers Save As… instead. */
+function detectPreviewKind(filename: string): PreviewKind {
+  const ext = (filename.split(".").pop() ?? "").toLowerCase();
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"].includes(ext)) return "image";
+  if (["mp3", "wav", "ogg", "opus", "flac", "m4a", "aac"].includes(ext)) return "audio";
+  if (["mp4", "webm", "mov", "mkv"].includes(ext)) return "video";
+  if (ext === "pdf") return "pdf";
+  if (
+    ["txt", "md", "json", "csv", "yaml", "yml", "toml", "ini", "log", "html",
+      "htm", "css", "js", "ts", "tsx", "jsx", "rs", "py", "go", "java", "kt",
+      "swift", "sh", "bash", "zsh", "c", "cpp", "h", "hpp", "xml"].includes(ext)
+  ) {
+    return "text";
+  }
+  return "binary";
+}
+
+/** Dispatch on `kind` to render the decrypted bytes inline. */
+async function renderPreview(
+  entry: PrivateEntry,
+  el: HTMLElement,
+  kind: PreviewKind,
+): Promise<void> {
+  el.replaceChildren();
+  el.textContent = "Decrypting…";
+  let bytes: Uint8Array;
   try {
     const dataMap = await dataMapFor(entry);
-    const bytes = await fetchPrivateData(dataMap);
-    const text = new TextDecoder().decode(bytes);
-    // Old entries (pre-envelope-removal) shipped as
-    // `{"v":1,"meta":{...},"content":"..."}`. Detect that shape
-    // narrowly and surface only the content; otherwise show the
-    // raw bytes, which is what we ship today.
-    try {
-      const parsed: unknown = JSON.parse(text);
-      if (
-        parsed && typeof parsed === "object" &&
-        (parsed as { v?: unknown }).v === 1 &&
-        "meta" in parsed &&
-        "content" in parsed &&
-        typeof (parsed as { content?: unknown }).content === "string"
-      ) {
-        el.textContent = (parsed as { content: string }).content;
-        return;
-      }
-    } catch {
-      // Not JSON — fall through.
-    }
-    el.textContent = text;
+    bytes = await fetchPrivateData(dataMap);
   } catch (e) {
     el.textContent = `Couldn't fetch: ${formatErr(e)}`;
+    return;
+  }
+  el.replaceChildren();
+  switch (kind) {
+    case "text": {
+      const text = new TextDecoder().decode(bytes);
+      const pre = document.createElement("pre");
+      pre.className = "private-row-text";
+      // Back-compat: old text etches were wrapped in an envelope
+      // `{"v":1,"meta":{...},"content":"..."}`. Detect that narrow
+      // shape and unwrap; otherwise show the raw text.
+      try {
+        const parsed: unknown = JSON.parse(text);
+        if (
+          parsed && typeof parsed === "object" &&
+          (parsed as { v?: unknown }).v === 1 &&
+          "meta" in parsed &&
+          "content" in parsed &&
+          typeof (parsed as { content?: unknown }).content === "string"
+        ) {
+          pre.textContent = (parsed as { content: string }).content;
+          el.appendChild(pre);
+          return;
+        }
+      } catch {
+        // not JSON — fall through.
+      }
+      pre.textContent = text;
+      el.appendChild(pre);
+      return;
+    }
+    case "image":
+    case "audio":
+    case "video": {
+      const tag = kind === "image" ? "img" : kind;
+      const node = document.createElement(tag) as HTMLImageElement | HTMLMediaElement;
+      node.className = `private-row-${kind}`;
+      if (kind !== "image") (node as HTMLMediaElement).controls = true;
+      const blob = new Blob([bytes], { type: mimeFor(entry.original_filename ?? entry.title, kind) });
+      const url = URL.createObjectURL(blob);
+      node.src = url;
+      // Revoke once loaded so we don't leak.
+      const revoke = (): void => URL.revokeObjectURL(url);
+      node.addEventListener("load", revoke, { once: true });
+      node.addEventListener("error", revoke, { once: true });
+      if (kind !== "image") {
+        node.addEventListener("loadeddata", revoke, { once: true });
+      }
+      el.appendChild(node);
+      return;
+    }
+    case "pdf": {
+      const iframe = document.createElement("iframe");
+      iframe.className = "private-row-pdf";
+      iframe.setAttribute("sandbox", "");
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      iframe.src = URL.createObjectURL(blob);
+      el.appendChild(iframe);
+      return;
+    }
+    case "binary":
+      // Shouldn't reach here — caller routes binary through Save As…
+      el.textContent = "Binary content. Use Save As… to write to disk.";
+      return;
+  }
+}
+
+function mimeFor(filename: string, kind: PreviewKind): string {
+  const ext = (filename.split(".").pop() ?? "").toLowerCase();
+  switch (ext) {
+    case "png": return "image/png";
+    case "jpg":
+    case "jpeg": return "image/jpeg";
+    case "gif": return "image/gif";
+    case "webp": return "image/webp";
+    case "svg": return "image/svg+xml";
+    case "mp3": return "audio/mpeg";
+    case "wav": return "audio/wav";
+    case "ogg":
+    case "opus": return "audio/ogg";
+    case "flac": return "audio/flac";
+    case "m4a":
+    case "aac": return "audio/aac";
+    case "mp4": return "video/mp4";
+    case "webm": return "video/webm";
+    case "mov": return "video/quicktime";
+    case "pdf": return "application/pdf";
+    default: return `${kind}/*`;
   }
 }
 
@@ -725,7 +872,7 @@ async function exportLibrary(
   const dest = await saveDialog({
     defaultPath: `etchit-private-backup-${new Date().toISOString().slice(0, 10)}.etchitbackup`,
     title: "Save private library backup",
-    filters: [{ name: "etch/it backup", extensions: ["etchitbackup"] }],
+    filters: [{ name: "etchit backup", extensions: ["etchitbackup"] }],
   });
   if (typeof dest !== "string") {
     flash("Cancelled.");
@@ -746,7 +893,7 @@ async function importLibrary(
 ): Promise<void> {
   const picked = await openDialog({
     multiple: false,
-    filters: [{ name: "etch/it backup", extensions: ["etchitbackup"] }],
+    filters: [{ name: "etchit backup", extensions: ["etchitbackup"] }],
   });
   if (typeof picked !== "string") return;
 
@@ -765,7 +912,7 @@ async function importLibrary(
   flash("Decrypting…");
   const plain = await backupDecrypt(bytes, password);
   if (!plain) {
-    flash("Wrong passphrase, or this isn't an etch/it backup file.");
+    flash("Wrong passphrase, or this isn't an etchit backup file.");
     return;
   }
 

@@ -45,6 +45,25 @@ pub struct InternalWalletInfo {
     pub eth_wei: String,
 }
 
+/// Just the derived Ethereum address — no balance queries. Cheap and
+/// network-free. Use this when you only need to identify the wallet
+/// (e.g. risk checks, displaying the address); use
+/// [`internal_wallet_info`] when you also need ANT/ETH balances.
+#[tauri::command]
+pub fn internal_wallet_address() -> Result<Option<String>, String> {
+    let Some(key) = secrets::get_stored_key() else {
+        return Ok(None);
+    };
+    let wallet = Wallet::from_private_key(
+        key,
+        RPC_URL.into(),
+        ANT_TOKEN_ADDRESS.into(),
+        VAULT_ADDRESS.into(),
+    )
+    .map_err(|e| format!("wallet build failed: {e}"))?;
+    Ok(Some(wallet.address()))
+}
+
 /// Read the keychain key, build a wallet, return address + balances.
 /// Returns `Ok(None)` when no key is stored; `Err` only on RPC / parse
 /// failures. The wallet object is constructed fresh and dropped at the

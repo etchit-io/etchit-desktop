@@ -75,6 +75,39 @@ pub async fn etch_text(
     Ok(result.address)
 }
 
+/// Upload raw bytes as public data. Returns the 64-hex address.
+/// Used by the private-etch flow to push an encrypted-data-map blob
+/// to Autonomi so other devices can retrieve it with the password.
+#[tauri::command]
+pub async fn etch_bytes(
+    state: State<'_, EtchState>,
+    data: Vec<u8>,
+) -> Result<String, String> {
+    let client = get_or_build_client(&state).await?;
+    let result = client
+        .data_put_public(data, PAYMENT_MODE.into())
+        .await
+        .map_err(|e| format!("upload failed: {e}"))?;
+    Ok(result.address)
+}
+
+/// Fetch arbitrary public bytes (no envelope, no decoding). The
+/// caller decrypts / decodes — we just hand back what the network
+/// returns. Used by the private-etch flow to pull encrypted-data-map
+/// blobs from their stored public addresses.
+#[tauri::command]
+pub async fn fetch_public_bytes(
+    state: State<'_, EtchState>,
+    address: String,
+) -> Result<Vec<u8>, String> {
+    // Read uses the walletless client — no wallet needed for fetches.
+    let client = get_or_build_external_client(&state).await?;
+    client
+        .data_get_public(address)
+        .await
+        .map_err(|e| format!("fetch failed: {e}"))
+}
+
 /// Upload a file as public data. Returns the 64-hex address.
 #[tauri::command]
 pub async fn etch_file(state: State<'_, EtchState>, path: String) -> Result<String, String> {

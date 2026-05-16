@@ -22,37 +22,32 @@ use tauri::{AppHandle, Manager};
 
 /// One persisted private etch.
 ///
-/// Two encryption-state-of-`data_map` shapes coexist:
+/// Wire shape:
 ///
-/// 1. **Cipher form** (new, default): `cipher_data_map` carries the
-///    AES-256-GCM-wrapped data-map and `data_map` is absent / empty.
-///    `owner_id` identifies the wallet whose at-rest key decrypts it.
-/// 2. **Plaintext form** (legacy, back-compat): `data_map` holds the
-///    raw hex data-map; `cipher_data_map` is absent. The next time
-///    the entry is touched the JS side migrates it to cipher form.
+/// * `enc_data_map_addr` — public Autonomi address holding the
+///   password-encrypted data-map blob (see `cipherBlob.ts` for the
+///   format). Reading the entry means fetching from this address
+///   and decrypting with the session password.
+/// * `data_map` — legacy plaintext data-map (hex) from before the
+///   password-encryption rewrite. Retained for back-compat reads;
+///   empty on new entries.
 ///
-/// The Rust side doesn't care which form is on disk — it just
-/// round-trips the JSON. Encryption / decryption lives in the JS
-/// layer next to the wallet signer that holds the at-rest key.
+/// No wallet identity stored — the password protects the
+/// encryption layer, the wallet only paid for the upload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrivateEntry {
     /// Random identifier — what the user clicks on in the Private tab.
     pub id: String,
     /// User-provided title (or first body line / file basename).
     pub title: String,
-    /// Legacy plaintext data-map (hex). Empty on cipher-form entries;
-    /// retained so existing pre-encryption libraries keep working.
+    /// Legacy plaintext data-map (hex). Empty on new entries;
+    /// retained so older libraries keep working without migration.
     #[serde(default)]
     pub data_map: String,
-    /// AES-256-GCM-wrapped data-map (hex of `iv || ct || tag`). New
-    /// entries always carry this; readers prefer it when present.
+    /// Public Autonomi address (64-hex) of the password-encrypted
+    /// data-map blob. New entries always carry this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cipher_data_map: Option<String>,
-    /// Wallet identifier whose at-rest key decrypts `cipher_data_map`.
-    /// `0x…` address for external mode, `keychain:0x…` for internal.
-    /// Stored so we know which key to derive on read.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owner_id: Option<String>,
+    pub enc_data_map_addr: Option<String>,
     /// Original payload size (in bytes) for the size hint in the library.
     pub size_bytes: u64,
     /// `"internal"` or `"external"`. Lets the UI explain which wallet
@@ -144,9 +139,9 @@ pub fn private_append(
     if entry.id.is_empty() {
         return Err("entry has no id".into());
     }
-    if entry.data_map.is_empty() && entry.cipher_data_map.as_deref().unwrap_or("").is_empty() {
+    if entry.data_map.is_empty() && entry.enc_data_map_addr.as_deref().unwrap_or("").is_empty() {
         return Err(
-            "entry has neither data_map nor cipher_data_map — refusing to persist an empty row"
+            "entry has neither data_map nor enc_data_map_addr — refusing to persist an empty row"
                 .into(),
         );
     }
@@ -192,8 +187,7 @@ mod tests {
             id: id.into(),
             title: format!("entry {id}"),
             data_map: format!("dm-{id}"),
-            cipher_data_map: None,
-            owner_id: None,
+            enc_data_map_addr: None,
             size_bytes: 12,
             wallet_mode: "internal".into(),
             wallet_address: "0xabc".into(),
@@ -205,18 +199,17 @@ mod tests {
     }
 
     #[test]
-    fn cipher_only_entry_round_trips() {
-        // New-shape entry — data_map empty, cipher_data_map populated.
+    fn enc_addr_entry_round_trips() {
+        // New-shape entry — data_map empty, enc_data_map_addr populated.
         let raw = r#"{"v":1,"entries":[{
             "id":"x","title":"t","data_map":"",
-            "cipher_data_map":"abcdef","owner_id":"keychain:0x1",
+            "enc_data_map_addr":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "size_bytes":1,"wallet_mode":"internal","wallet_address":"0x",
             "chunks_stored":1,"ts_ms":1
         }]}"#;
         let parsed: PrivateFile = serde_json::from_str(raw).unwrap();
         assert_eq!(parsed.entries[0].data_map, "");
-        assert_eq!(parsed.entries[0].cipher_data_map.as_deref(), Some("abcdef"));
-        assert_eq!(parsed.entries[0].owner_id.as_deref(), Some("keychain:0x1"));
+        assert_eq!(parsed.entries[0].enc_data_map_addr.as_deref().map(|s| s.len()), Some(64));
     }
 
     #[test]

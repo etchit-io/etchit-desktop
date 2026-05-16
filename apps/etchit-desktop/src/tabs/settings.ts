@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { ask } from "@tauri-apps/plugin-dialog";
 
 import { normalizeSecretKey } from "../etch/secretKey";
 import { applyTheme, loadTheme, type Theme } from "../theme/theme";
@@ -44,7 +45,7 @@ export function mountSettings(host: HTMLElement): void {
         <details class="settings-collapsible">
           <summary><h2>Appearance</h2></summary>
           <p class="settings-desc">
-            etch/it ships dark — pick a softer surface if dark isn&rsquo;t your thing.
+            etch<span class="brand-mark">/</span>it ships dark — pick a softer surface if dark isn&rsquo;t your thing.
           </p>
           <div class="settings-theme-options" role="radiogroup" aria-label="Theme"></div>
         </details>
@@ -54,7 +55,7 @@ export function mountSettings(host: HTMLElement): void {
         <h2>Advanced &mdash; wallet key</h2>
         <p class="settings-desc">
           For etching without WalletConnect. Paste a hex private key and
-          etch/it will use it to pay for uploads, storing it only in
+          etch<span class="brand-mark">/</span>it will use it to pay for uploads, storing it only in
           your operating system&rsquo;s keychain &mdash; never on disk in
           plaintext.
         </p>
@@ -86,7 +87,7 @@ export function mountSettings(host: HTMLElement): void {
         <details class="settings-collapsible">
           <summary><h2>About</h2></summary>
           <p class="settings-desc">
-            <strong>etch/it &mdash; beta software.</strong>
+            <strong>etch<span class="brand-mark">/</span>it &mdash; beta software.</strong>
             Dual-licensed under
             <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer">AGPL-3.0-only</a>
             and a separate commercial license (see <code>COMMERCIAL.md</code>). Provided
@@ -94,7 +95,7 @@ export function mountSettings(host: HTMLElement): void {
             15 &amp; 16 of the AGPL for the full disclaimer.
           </p>
           <p class="settings-desc settings-desc-muted">
-            Companion reader: <strong>fetch&gt;it</strong>.
+            Companion reader: <strong>fetch<span class="brand-mark">&gt;</span>it</strong>.
           </p>
         </details>
       </section>
@@ -161,41 +162,69 @@ function mountAdvanced(host: HTMLElement): void {
 
   input.addEventListener("input", refreshStoreEnabled);
 
+  /** Native OS confirm dialog via plugin-dialog. WebView
+   *  `window.confirm` is unreliable across Tauri configurations; the
+   *  plugin uses GTK / WKWebView / Win32 native dialogs and always
+   *  pops.
+   *
+   *  The wallet key only pays for uploads — private etches are
+   *  protected by a separate passphrase, so clearing the key does
+   *  NOT affect their decryption. The risk is losing access to the
+   *  wallet itself (and any ANT/ETH still on it) if the user
+   *  doesn't have it written down somewhere. */
+  async function confirmKeyChange(action: "clear" | "replace"): Promise<boolean> {
+    const verb = action === "clear" ? "Clear" : "Replace";
+    const present = action === "clear" ? "Clearing" : "Replacing";
+    const msg = [
+      `${present} the wallet key removes it from this device's keychain.`,
+      "",
+      "Make sure you have this private key written down or saved elsewhere — once cleared from here, etchit can't recover it for you.",
+      "",
+      "Future etches in Internal mode will need you to paste a key in again, or you can switch to WalletConnect.",
+      "",
+      `Continue?`,
+    ].join("\n");
+    return ask(msg, { title: `${verb} wallet key`, kind: "warning" });
+  }
+
   storeBtn.addEventListener("click", () => {
-    const value = input.value;
-    storeBtn.disabled = true;
-    storeBtn.textContent = "Storing…";
-    void invoke<void>("store_secret_key", { key: value }).then(
-      () => {
+    void (async () => {
+      const hadKey = !clearBtn.hidden;
+      if (hadKey && !(await confirmKeyChange("replace"))) return;
+      const value = input.value;
+      storeBtn.disabled = true;
+      storeBtn.textContent = "Storing…";
+      try {
+        await invoke<void>("store_secret_key", { key: value });
         input.value = "";
         storeBtn.textContent = "Store key";
         refreshStoreEnabled();
         setStatusStored();
         announceKeychainChange();
-      },
-      (e) => {
+      } catch (e) {
         storeBtn.textContent = "Store key";
         refreshStoreEnabled();
         setStatusError(formatErr(e));
-      },
-    );
+      }
+    })();
   });
 
   clearBtn.addEventListener("click", () => {
-    clearBtn.disabled = true;
-    clearBtn.textContent = "Clearing…";
-    void invoke<void>("clear_secret_key").then(
-      () => {
+    void (async () => {
+      if (!(await confirmKeyChange("clear"))) return;
+      clearBtn.disabled = true;
+      clearBtn.textContent = "Clearing…";
+      try {
+        await invoke<void>("clear_secret_key");
         clearBtn.textContent = "Clear stored key";
         clearBtn.disabled = false;
         setStatusEmpty();
         announceKeychainChange();
-      },
-      (e) => {
+      } catch (e) {
         clearBtn.textContent = "Clear stored key";
         clearBtn.disabled = false;
         setStatusError(formatErr(e));
-      },
-    );
+      }
+    })();
   });
 }
