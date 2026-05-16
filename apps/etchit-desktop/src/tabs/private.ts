@@ -864,14 +864,14 @@ async function exportLibrary(
     flash("Nothing to export — library is empty.");
     return;
   }
-  const password = await openBackupModal("create");
+  // Reuse the session passphrase. One passphrase covers everything:
+  // it encrypts each entry's data-map blob and wraps the backup
+  // file. Restoring on another device only needs the backup + this
+  // same passphrase.
+  const password = await ensurePassword({ purpose: "open" });
   if (!password) return;
 
   flash("Encrypting…");
-  // The payload is the entries JSON verbatim. Each entry already
-  // carries `cipher_data_map` (wallet-key encrypted), so the
-  // password-encrypted file wraps already-encrypted blobs — both
-  // factors required to recover content on another device.
   const payload = new TextEncoder().encode(
     JSON.stringify({ v: 1, entries: state.entries }),
   );
@@ -894,7 +894,7 @@ async function exportLibrary(
   }
   try {
     await invoke("save_bytes_to_path", { path: dest, data: Array.from(bytes) });
-    flash(`Backup saved to ${dest}. Keep the passphrase safe.`);
+    flash(`Backup saved to ${dest}. Decrypts with your library passphrase.`);
   } catch (e) {
     flash(`Couldn't save: ${formatErr(e)}`);
   }
@@ -929,6 +929,10 @@ async function importLibrary(
     flash("Wrong passphrase, or this isn't an etchit backup file.");
     return;
   }
+  // The backup passphrase IS the library passphrase — every entry's
+  // data-map blob was encrypted with it. Promote it to the session
+  // so restored entries open without a second prompt.
+  setSessionPassword(password);
 
   let parsed: { entries?: unknown };
   try {
