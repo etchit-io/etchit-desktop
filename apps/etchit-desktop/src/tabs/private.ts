@@ -33,6 +33,7 @@ import { decryptBlob, encryptBlob } from "../private/cipherBlob";
 import { openPasswordModal } from "../private/passwordModal";
 import {
   currentPassword,
+  loadStoredPassword,
   setSessionPassword,
 } from "../private/passwordSession";
 import { mountActiveWalletBanner } from "../wallet/activeBanner";
@@ -91,6 +92,11 @@ export function mountPrivate(host: HTMLElement): void {
         <button type="button" class="etch-mode" data-mode="file" role="tab" aria-selected="false">File</button>
       </div>
 
+      <div class="etch-title-row">
+        <label class="etch-label" for="private-title">Title</label>
+        <input id="private-title" class="etch-input" type="text" placeholder="label for your library on this device — never uploaded" maxlength="80" autocomplete="off" spellcheck="false">
+      </div>
+
       <section class="etch-form" data-mode="text">
         <label class="etch-label" for="private-body">Body</label>
         <textarea id="private-body" class="etch-textarea" rows="14" placeholder="paste or type — encrypted before it touches the network"></textarea>
@@ -133,6 +139,7 @@ export function mountPrivate(host: HTMLElement): void {
 
   const root = host.querySelector(".private-tab") as HTMLElement;
   const bodyEl = root.querySelector("#private-body") as HTMLTextAreaElement;
+  const titleEl = root.querySelector("#private-title") as HTMLInputElement;
   const bannerEl = root.querySelector(".private-wallet-banner") as HTMLElement;
   const submitEl = root.querySelector(".private-submit") as HTMLButtonElement;
   const resultEl = root.querySelector(".private-result") as HTMLElement;
@@ -174,11 +181,14 @@ export function mountPrivate(host: HTMLElement): void {
       return;
     }
     submitEl.textContent = "Etch privately";
-    submitEl.disabled =
+    const noTitle = titleEl.value.trim().length === 0;
+    const noContent =
       state.mode === "text" ? bodyEl.value.trim().length === 0 : state.picked.length === 0;
+    submitEl.disabled = noTitle || noContent;
   };
 
   bodyEl.addEventListener("input", refreshSubmit);
+  titleEl.addEventListener("input", refreshSubmit);
   for (const btn of root.querySelectorAll<HTMLButtonElement>(".etch-mode")) {
     btn.addEventListener("click", () => setMode(btn.dataset.mode as Mode));
   }
@@ -224,6 +234,12 @@ export function mountPrivate(host: HTMLElement): void {
         });
     } else {
       pickedSummaryEl.textContent = "";
+    }
+    if (state.picked.length > 0 && titleEl.value.trim() === "") {
+      const first = state.picked[0];
+      titleEl.value = state.picked.length === 1
+        ? first.isDir ? `${first.label}/` : first.label
+        : `${state.picked.length} files`;
     }
     refreshSubmit();
   };
@@ -444,10 +460,10 @@ export function mountPrivate(host: HTMLElement): void {
 
     const mode = loadWalletMode();
 
+    const localTitle = titleEl.value.trim();
     if (state.mode === "text") {
       const body = bodyEl.value;
       const bodyBytes = new TextEncoder().encode(body);
-      const localTitle = firstLine(body) || "Untitled";
       if (mode === "external") {
         void uploadPrivateViaWallet(bodyBytes, setStatus).then(
           (r) => {
@@ -512,7 +528,7 @@ export function mountPrivate(host: HTMLElement): void {
             wallet_address: r.walletAddress,
             chunks_stored: r.chunksStored,
             size_bytes: totalSize,
-            title: filename,
+            title: localTitle,
             original_filename: filename,
           });
         },
@@ -538,7 +554,7 @@ export function mountPrivate(host: HTMLElement): void {
           wallet_address: info?.address ?? "",
           chunks_stored: result.chunks_stored,
           size_bytes: totalSize,
-          title: filename,
+          title: localTitle,
           original_filename: filename,
         });
       },
@@ -603,6 +619,7 @@ export function mountPrivate(host: HTMLElement): void {
     } else {
       clearPicked();
     }
+    titleEl.value = "";
     refreshSubmit();
     resultEl.hidden = false;
     resultEl.innerHTML = `
@@ -657,6 +674,11 @@ async function dataMapFor(entry: PrivateEntry): Promise<string> {
 async function ensurePassword(
   opts: { purpose?: "etch" | "open" } = {},
 ): Promise<string | null> {
+  // Wait out the startup keychain hydrate before deciding to prompt.
+  // Without this, an etch fired faster than the keychain read would
+  // see an empty session and pop the create modal, overwriting the
+  // stored passphrase and orphaning the rest of the library.
+  await loadStoredPassword();
   const cached = currentPassword();
   if (cached) return cached;
   const mode = opts.purpose === "open" ? "enter" : "create";
@@ -824,14 +846,6 @@ async function saveFile(
   } catch (e) {
     flash(`Couldn't save: ${formatErr(e)}`);
   }
-}
-
-function firstLine(body: string): string {
-  const line = body
-    .split("\n")
-    .map((s) => s.trim())
-    .find((s) => s.length > 0) ?? "";
-  return line.length > 80 ? `${line.slice(0, 77)}…` : line;
 }
 
 function formatBytes(n: number): string {

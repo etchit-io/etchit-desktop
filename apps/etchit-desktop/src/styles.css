@@ -459,6 +459,12 @@ code {
 }
 .etch-form[hidden] { display: none; }
 
+.etch-title-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .etch-label {
   font-size: 0.78rem;
   font-weight: 600;

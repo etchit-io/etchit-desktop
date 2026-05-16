@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 
 import { normalizeSecretKey } from "../etch/secretKey";
+import { clearPasswordSession } from "../private/passwordSession";
 import { applyTheme, loadTheme, type Theme } from "../theme/theme";
 import { formatErr } from "../util/error";
 import { KEYCHAIN_CHANGED_EVENT } from "../wallet/statusPill";
@@ -84,6 +85,30 @@ export function mountSettings(host: HTMLElement): void {
       </section>
 
       <section class="settings-section">
+        <h2>Advanced &mdash; private passphrase</h2>
+        <p class="settings-desc">
+          The passphrase that encrypts every private etch on this
+          device. Kept in your OS keychain so the same library opens
+          on every launch &mdash; never in a file, never uploaded.
+          Clearing it forces a brand-new passphrase on your next
+          private etch.
+        </p>
+        <div class="settings-warn">
+          <p class="settings-warn-title">Write your passphrase down.</p>
+          <p class="settings-warn-body">
+            If the keychain is wiped or you move to another device,
+            the passphrase is the only thing that can decrypt your
+            library. No one &mdash; including etchit &mdash; can
+            recover it for you.
+          </p>
+        </div>
+        <div class="settings-key-actions">
+          <button type="button" class="settings-pw-clear" hidden>Clear stored passphrase</button>
+        </div>
+        <p class="settings-pw-status" role="status" aria-live="polite">checking&hellip;</p>
+      </section>
+
+      <section class="settings-section">
         <details class="settings-collapsible">
           <summary><h2>About</h2></summary>
           <p class="settings-desc">
@@ -104,6 +129,7 @@ export function mountSettings(host: HTMLElement): void {
 
   mountAppearance(host);
   mountAdvanced(host);
+  mountPassphrase(host);
 }
 
 function mountAppearance(host: HTMLElement): void {
@@ -224,6 +250,67 @@ function mountAdvanced(host: HTMLElement): void {
         clearBtn.textContent = "Clear stored key";
         clearBtn.disabled = false;
         setStatusError(formatErr(e));
+      }
+    })();
+  });
+}
+
+function mountPassphrase(host: HTMLElement): void {
+  const clearBtn = host.querySelector(".settings-pw-clear") as HTMLButtonElement;
+  const status = host.querySelector(".settings-pw-status") as HTMLParagraphElement;
+
+  const setStored = (): void => {
+    status.textContent = "Passphrase stored. Library opens automatically on every launch.";
+    status.dataset.tone = "ok";
+    clearBtn.hidden = false;
+  };
+  const setEmpty = (): void => {
+    status.textContent = "No passphrase stored yet. One will be set the first time you etch privately.";
+    status.dataset.tone = "muted";
+    clearBtn.hidden = true;
+  };
+  const setError = (msg: string): void => {
+    status.textContent = msg;
+    status.dataset.tone = "error";
+  };
+
+  void invoke<boolean>("has_private_passphrase").then(
+    (present) => (present ? setStored() : setEmpty()),
+    (e) => setError(formatErr(e)),
+  );
+
+  async function confirmClear(): Promise<boolean> {
+    const msg = [
+      "Clearing the passphrase removes it from this device's keychain.",
+      "",
+      "WARNING: every private etch in your library — and any backup file you've made — needs this passphrase to decrypt. Without it, the encrypted chunks stay on the network forever but no one (including you) can read them again.",
+      "",
+      "Have you saved the passphrase somewhere safe (written down, password manager, etc.)?",
+      "",
+      "Continue?",
+    ].join("\n");
+    return ask(msg, { title: "Clear private passphrase", kind: "warning" });
+  }
+
+  clearBtn.addEventListener("click", () => {
+    void (async () => {
+      if (!(await confirmClear())) return;
+      clearBtn.disabled = true;
+      clearBtn.textContent = "Clearing…";
+      try {
+        clearPasswordSession();
+        // clearPasswordSession fires the keychain delete in the
+        // background; wait a tick + re-read to surface any error
+        // path that might come back.
+        const stillThere = await invoke<boolean>("has_private_passphrase");
+        if (stillThere) throw new Error("keychain reports the passphrase is still present");
+        clearBtn.textContent = "Clear stored passphrase";
+        clearBtn.disabled = false;
+        setEmpty();
+      } catch (e) {
+        clearBtn.textContent = "Clear stored passphrase";
+        clearBtn.disabled = false;
+        setError(formatErr(e));
       }
     })();
   });

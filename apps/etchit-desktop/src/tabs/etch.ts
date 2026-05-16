@@ -39,6 +39,11 @@ export function mountEtch(host: HTMLElement): void {
         <button type="button" class="etch-mode" data-mode="file" role="tab" aria-selected="false">File</button>
       </div>
 
+      <div class="etch-title-row">
+        <label class="etch-label" for="etch-title">Title</label>
+        <input id="etch-title" class="etch-input" type="text" placeholder="label for History on this device — never uploaded" maxlength="80" autocomplete="off" spellcheck="false">
+      </div>
+
       <section class="etch-form" data-mode="text">
         <label class="etch-label" for="etch-body">Body</label>
         <textarea id="etch-body" class="etch-textarea" rows="14" placeholder="paste or type — exactly what you write is what lands on the network"></textarea>
@@ -66,6 +71,7 @@ export function mountEtch(host: HTMLElement): void {
   const $ = <T extends HTMLElement>(sel: string): T => host.querySelector(sel) as T;
 
   const bodyEl = $<HTMLTextAreaElement>("#etch-body");
+  const titleEl = $<HTMLInputElement>("#etch-title");
   const dropEl = $<HTMLDivElement>(".etch-drop");
   const pickedListEl = $<HTMLUListElement>(".etch-picked-list");
   const pickedSummaryEl = $<HTMLParagraphElement>(".etch-picked-summary");
@@ -121,6 +127,9 @@ export function mountEtch(host: HTMLElement): void {
     } else {
       pickedSummaryEl.textContent = "";
     }
+    if (state.picked.length > 0 && titleEl.value.trim() === "") {
+      titleEl.value = fileLabel(state.picked);
+    }
     refreshSubmit();
   };
 
@@ -171,9 +180,11 @@ export function mountEtch(host: HTMLElement): void {
       return;
     }
     submitEl.textContent = "Etch";
-    submitEl.disabled = state.mode === "text"
+    const noTitle = titleEl.value.trim().length === 0;
+    const noContent = state.mode === "text"
       ? bodyEl.value.trim().length === 0
       : state.picked.length === 0;
+    submitEl.disabled = noTitle || noContent;
   }
 
   function showResult(address: string): void {
@@ -222,6 +233,7 @@ export function mountEtch(host: HTMLElement): void {
   }
 
   bodyEl.addEventListener("input", refreshSubmit);
+  titleEl.addEventListener("input", refreshSubmit);
 
   ($<HTMLButtonElement>(".etch-pick")).addEventListener("click", () => {
     void openDialog({ multiple: true })
@@ -240,19 +252,17 @@ export function mountEtch(host: HTMLElement): void {
     errorEl.hidden = true;
     refreshSubmit();
 
+    const label = titleEl.value.trim();
     const done = (address: string): void => {
       state.status = "idle";
-      let label: string;
+      historyAppendBestEffort(address, label, state.mode === "text" ? "text" : "file");
       if (state.mode === "text") {
-        label = firstLine(bodyEl.value) || "Untitled text";
-        historyAppendBestEffort(address, label, "text");
         bodyEl.value = "";
       } else {
-        label = fileLabel(state.picked);
-        historyAppendBestEffort(address, label, "file");
         state.picked = [];
         renderPicked();
       }
+      titleEl.value = "";
       refreshSubmit();
       showResult(address);
     };
@@ -314,13 +324,8 @@ export function mountEtch(host: HTMLElement): void {
   });
 }
 
-function firstLine(body: string): string {
-  const line = body.split("\n").map((s) => s.trim()).find((s) => s.length > 0) ?? "";
-  return line.length > 80 ? `${line.slice(0, 77)}…` : line;
-}
-
 function fileLabel(picked: PickedItem[]): string {
-  if (picked.length === 0) return "File";
+  if (picked.length === 0) return "";
   if (picked.length === 1) return picked[0].isDir ? `${picked[0].label}/` : picked[0].label;
   return `${picked.length} files`;
 }

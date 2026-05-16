@@ -11,6 +11,7 @@ use keyring::Entry;
 
 const SERVICE: &str = "io.etchit.desktop";
 const ACCOUNT: &str = "ant-wallet-key";
+const PASSPHRASE_ACCOUNT: &str = "private-passphrase";
 
 /// Read the stored wallet key, if any. Returns `None` for "no key
 /// stored" or any backend failure — the upload path treats both the
@@ -73,6 +74,65 @@ pub fn clear_secret_key() -> Result<(), String> {
 #[tauri::command]
 pub fn has_secret_key() -> bool {
     get_stored_key().is_some()
+}
+
+// ── Private-etch passphrase ─────────────────────────────────────────
+//
+// Same keychain backend, different account. The passphrase is the
+// session secret used to encrypt every private etch's data-map blob;
+// persisting it here means subsequent app launches don't have to
+// prompt for it, and every new etch on this device lands under the
+// same key (so the library is decryptable as a whole).
+
+/// Read the stored passphrase, or `None` if none was set. Exposed to
+/// JS so the in-memory session can hydrate on startup; callers are
+/// expected to keep it in memory rather than re-invoking per use.
+#[tauri::command]
+pub fn get_private_passphrase() -> Option<String> {
+    let entry = Entry::new(SERVICE, PASSPHRASE_ACCOUNT).ok()?;
+    match entry.get_password() {
+        Ok(p) => Some(p),
+        Err(keyring::Error::NoEntry) => None,
+        Err(e) => {
+            eprintln!("[etchit] keychain read failed: {e}");
+            None
+        }
+    }
+}
+
+/// Store the private-etch passphrase in the OS keychain. Whitespace
+/// is preserved (passphrases can have meaningful spaces); empty
+/// input is rejected so a blank value can't silently overwrite a
+/// real one.
+#[tauri::command]
+pub fn store_private_passphrase(passphrase: String) -> Result<(), String> {
+    if passphrase.is_empty() {
+        return Err("passphrase is empty".to_string());
+    }
+    let entry = Entry::new(SERVICE, PASSPHRASE_ACCOUNT)
+        .map_err(|e| format!("keychain unavailable: {e}"))?;
+    entry
+        .set_password(&passphrase)
+        .map_err(|e| format!("keychain write failed: {e}"))
+}
+
+/// Remove the stored passphrase. No-op if none was stored.
+#[tauri::command]
+pub fn clear_private_passphrase() -> Result<(), String> {
+    let entry = Entry::new(SERVICE, PASSPHRASE_ACCOUNT)
+        .map_err(|e| format!("keychain unavailable: {e}"))?;
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("keychain delete failed: {e}")),
+    }
+}
+
+/// Whether a private-etch passphrase is currently stored. Presence
+/// only — used by Settings to gate the Clear button.
+#[tauri::command]
+pub fn has_private_passphrase() -> bool {
+    get_private_passphrase().is_some()
 }
 
 #[cfg(test)]
