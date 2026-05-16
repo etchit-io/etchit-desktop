@@ -10,6 +10,7 @@ import { formatErr } from "../util/error";
 import { mountActiveWalletBanner } from "../wallet/activeBanner";
 import { uploadBytesViaWallet } from "../wallet/externalUpload";
 import { loadWalletMode } from "../wallet/mode";
+import { isWalletReady, onReadinessChange } from "../wallet/readiness";
 
 const SIZE_WARN_BYTES = 4 * 1024 * 1024;
 const READ_WORDS_PER_MINUTE = 200;
@@ -18,6 +19,7 @@ interface TabState {
   status: "idle" | "etching";
   composer: ComposerHandle | null;
   template: Template | null;
+  walletReady: boolean;
 }
 
 /** Tracks the currently-attached document keydown listener so re-rendering
@@ -50,7 +52,7 @@ function currentPalette(): BlogPalette {
 export function mountBlogger(host: HTMLElement): void {
   host.innerHTML = `<div class="blog-tab"></div>`;
   const root = host.querySelector(".blog-tab") as HTMLElement;
-  const state: TabState = { status: "idle", composer: null, template: null };
+  const state: TabState = { status: "idle", composer: null, template: null, walletReady: true };
 
   const showPicker = (): void => {
     setActiveKeyHandler(null);
@@ -167,13 +169,21 @@ function renderComposer(
       etchBtn.textContent = "Etching…";
       previewBtn.disabled = true;
     } else {
-      etchBtn.textContent = "Etch";
-      etchBtn.disabled = !ready;
+      etchBtn.textContent = state.walletReady ? "Etch" : "Set up wallet first";
+      etchBtn.disabled = !ready || !state.walletReady;
       previewBtn.disabled = !ready;
     }
   };
   composer.onChange(refresh);
   refresh();
+  void isWalletReady().then((ready) => {
+    state.walletReady = ready;
+    refresh();
+  });
+  onReadinessChange((ready) => {
+    state.walletReady = ready;
+    refresh();
+  });
 
   const closePreview = (): void => {
     previewPane.hidden = true;

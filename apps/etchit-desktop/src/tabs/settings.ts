@@ -70,6 +70,22 @@ export function mountSettings(host: HTMLElement): void {
             holds anything you&rsquo;d be upset to lose.
           </p>
         </div>
+        <details class="settings-howto">
+          <summary>Where do I get a wallet key?</summary>
+          <ol class="settings-howto-list">
+            <li>Install an EVM-compatible wallet that lets you export a private key (MetaMask, Rabby, etc.).</li>
+            <li>Create a fresh account inside that wallet to use only for etching.</li>
+            <li>Switch the wallet to the <strong>Arbitrum One</strong> network.</li>
+            <li>Fund the account with a small amount of <strong>ETH</strong> (for gas) and <strong>ANT</strong> (for storage payments).</li>
+            <li>Export the private key for that account and paste it below.</li>
+          </ol>
+          <p class="settings-howto-note">
+            Rather not extract a private key at all? Switch to
+            <strong>WalletConnect</strong> in the Wallet tab &mdash; the key
+            stays inside your wallet app and every etch pops it for an
+            explicit signature.
+          </p>
+        </details>
         <label class="settings-key-label" for="settings-key-input">Private key</label>
         <input
           id="settings-key-input"

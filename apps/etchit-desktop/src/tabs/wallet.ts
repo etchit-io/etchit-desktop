@@ -123,6 +123,7 @@ function renderInternal(host: HTMLElement): void {
 }
 
 function paintInternalCard(host: HTMLElement, info: InternalWalletInfo): void {
+  const lowFundsHtml = lowFundsBanner(info.ant_atto, info.eth_wei);
   host.innerHTML = `
     <div class="wallet-card">
       <p class="wallet-card-label">Internal wallet · Arbitrum One</p>
@@ -140,6 +141,7 @@ function paintInternalCard(host: HTMLElement, info: InternalWalletInfo): void {
           <span class="wallet-balance-symbol">ETH</span>
         </div>
       </div>
+      ${lowFundsHtml}
       <p class="wallet-hint">
         Used for every etch while <strong>Internal</strong> mode is selected. Rotate or
         clear the key in <button type="button" class="wallet-link wallet-link-settings">Settings → Advanced</button>.
@@ -256,6 +258,8 @@ async function loadExternalBalance(host: HTMLElement, address: string): Promise<
   if (!antEl || !ethEl) return;
   antEl.textContent = "…";
   ethEl.textContent = "…";
+  // Drop any low-funds note from the previous balance load.
+  host.querySelector(".wallet-lowfunds")?.remove();
   try {
     const [antAtto, ethWei] = await Promise.all([
       (antContract.balanceOf(address) as Promise<bigint>).then((b) => b.toString()),
@@ -263,6 +267,16 @@ async function loadExternalBalance(host: HTMLElement, address: string): Promise<
     ]);
     antEl.textContent = formatToken(antAtto);
     ethEl.textContent = formatToken(ethWei, 18, 5);
+    const html = lowFundsBanner(antAtto, ethWei);
+    if (html) {
+      const card = host.querySelector(".wallet-card");
+      if (card) {
+        const note = document.createElement("template");
+        note.innerHTML = html.trim();
+        const el = note.content.firstChild;
+        if (el) card.insertBefore(el, host.querySelector(".wallet-hint"));
+      }
+    }
   } catch (e: unknown) {
     antEl.textContent = "—";
     ethEl.textContent = "—";
@@ -273,6 +287,44 @@ async function loadExternalBalance(host: HTMLElement, address: string): Promise<
       note.textContent = `Balance lookup failed: ${formatErr(e)}`;
       card.appendChild(note);
     }
+  }
+}
+
+/** Render a low-funds prompt below the balance display when either
+ *  ANT or ETH is at zero. Returns an empty string when both are
+ *  non-zero — no banner needed. The check is strict zero rather than
+ *  a threshold: any positive ANT means *some* etch fits, and gating
+ *  on a guessed threshold either nags users with small wallets or
+ *  fails to catch the "I never funded this" case. */
+function lowFundsBanner(antAtto: string, ethWei: string): string {
+  const noAnt = isZero(antAtto);
+  const noEth = isZero(ethWei);
+  if (!noAnt && !noEth) return "";
+  let headline: string;
+  let body: string;
+  if (noAnt && noEth) {
+    headline = "This wallet has no ANT or ETH.";
+    body = "Fund it with a small amount of ETH (for gas) and ANT (for storage) on Arbitrum One before you try to etch.";
+  } else if (noAnt) {
+    headline = "This wallet has no ANT.";
+    body = "Etching costs ANT on Arbitrum One. Send some to the address above and refresh.";
+  } else {
+    headline = "This wallet has no ETH.";
+    body = "Etching needs a tiny amount of ETH for gas on Arbitrum One. Send a fraction of an ETH to the address above and refresh.";
+  }
+  return `
+    <div class="wallet-lowfunds">
+      <p class="wallet-lowfunds-headline">${escapeHtml(headline)}</p>
+      <p class="wallet-lowfunds-body">${escapeHtml(body)}</p>
+    </div>
+  `;
+}
+
+function isZero(decimal: string): boolean {
+  try {
+    return BigInt(decimal) === 0n;
+  } catch {
+    return false;
   }
 }
 

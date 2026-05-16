@@ -3,9 +3,10 @@
 // public and private), hands the resulting payments + total here, and
 // receives the on-chain pay tx hash to thread into its finalize call.
 
-import { Interface, JsonRpcProvider, type Eip1193Provider } from "ethers";
+import { Contract, Interface, JsonRpcProvider, type Eip1193Provider } from "ethers";
 
 import { currentAccount, currentProvider, waitForConnection } from "./appkit";
+import { formatToken, shortHexAddress } from "./balance";
 import {
   ANT_TOKEN_ADDRESS,
   ARBITRUM_CHAIN_ID,
@@ -57,6 +58,14 @@ export async function runWalletPayment(
 
   const totalAtto = BigInt(totalAmount);
 
+  // Pre-flight balance check. The on-chain `payForQuotes` revert is
+  // the worst onboarding moment — the user has signed 2-3 prompts
+  // and finally hits "payForQuotes reverted (0x…)" with no idea what
+  // it means. Catching insufficient ANT here gives a readable
+  // message before the wallet even pops.
+  progress("Checking ANT balance…");
+  await ensureSufficientAnt(userAddress, totalAtto);
+
   progress("Checking ANT allowance…");
   const allowanceData = erc20Iface.encodeFunctionData("allowance", [userAddress, VAULT_ADDRESS]);
   const allowanceHex = await rpc.call({ to: ANT_TOKEN_ADDRESS, data: allowanceData });
@@ -76,7 +85,11 @@ export async function runWalletPayment(
     }
     progress(`Waiting for approval confirmation (${shortTx(approveHash)})…`);
     const receipt = await rpc.waitForTransaction(approveHash);
-    if (receipt?.status !== 1) throw new Error(`ANT approve reverted (${approveHash}).`);
+    if (receipt?.status !== 1) {
+      throw new Error(
+        `ANT approval failed on-chain (tx ${approveHash}). Often this means the wallet's ETH was just spent on something else — check the wallet for the failing tx.`,
+      );
+    }
   }
 
   progress("Sign payment in your wallet…");
@@ -97,9 +110,35 @@ export async function runWalletPayment(
   }
   progress(`Waiting for payment confirmation (${shortTx(payTxHash)})…`);
   const payReceipt = await rpc.waitForTransaction(payTxHash);
-  if (payReceipt?.status !== 1) throw new Error(`payForQuotes reverted (${payTxHash}).`);
+  if (payReceipt?.status !== 1) {
+    throw new Error(
+      `On-chain payment reverted (tx ${payTxHash}). Usually means ANT balance went below the quote between the pre-flight check and the send — refund the wallet and retry.`,
+    );
+  }
 
   return { payTxHash, walletAddress: userAddress };
+}
+
+const ANT_ERC20_ABI = ["function balanceOf(address owner) view returns (uint256)"];
+const antContract = new Contract(ANT_TOKEN_ADDRESS, ANT_ERC20_ABI, rpc);
+
+async function ensureSufficientAnt(address: string, neededAtto: bigint): Promise<void> {
+  let balance: bigint;
+  try {
+    balance = await (antContract.balanceOf(address) as Promise<bigint>);
+  } catch (e: unknown) {
+    // Balance lookup failed — don't block the flow on a transient
+    // RPC blip; the on-chain check still applies.
+    // eslint-disable-next-line no-console
+    console.warn("[wallet] balance pre-check failed:", e);
+    return;
+  }
+  if (balance >= neededAtto) return;
+  const have = formatToken(balance.toString());
+  const need = formatToken(neededAtto.toString());
+  throw new Error(
+    `Not enough ANT in ${shortHexAddress(address)} — this etch needs ${need} ANT but the wallet only has ${have} ANT on Arbitrum One. Top it up and retry.`,
+  );
 }
 
 /** Map the payments list into the `{quote_hash: tx_hash}` form

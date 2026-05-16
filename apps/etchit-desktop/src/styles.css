@@ -329,6 +329,45 @@ code {
   line-height: 1.5;
 }
 
+.settings-howto {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: var(--ash);
+}
+.settings-howto > summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--copper);
+  list-style: none;
+  padding: 0.35rem 0;
+}
+.settings-howto > summary::-webkit-details-marker { display: none; }
+.settings-howto > summary::after {
+  content: "▾";
+  margin-left: 0.4em;
+  font-size: 0.75em;
+  opacity: 0.7;
+}
+.settings-howto[open] > summary::after { content: "▴"; }
+.settings-howto-list {
+  margin: 0.5rem 0 0.7rem;
+  padding-left: 1.4rem;
+  line-height: 1.6;
+}
+.settings-howto-list li {
+  margin: 0.2rem 0;
+}
+.settings-howto-list strong {
+  color: var(--bone);
+  font-weight: 600;
+}
+.settings-howto-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--ash);
+}
+
 .settings-key-label {
   display: block;
   font-size: 0.78rem;
@@ -2337,6 +2376,26 @@ body[data-theme="light"] .site-edit-preview-etch { color: #fff; }
   font-size: 0.85rem;
   color: var(--ash);
   line-height: 1.55;
+}
+
+.wallet-lowfunds {
+  border-left: 3px solid var(--copper);
+  background: color-mix(in srgb, var(--copper) 7%, transparent);
+  padding: 0.55rem 0.85rem;
+  margin: 0 0 0.5rem;
+  border-radius: 0 6px 6px 0;
+}
+.wallet-lowfunds-headline {
+  margin: 0 0 0.15rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--bone);
+}
+.wallet-lowfunds-body {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--ash);
 }
 
 .wallet-refresh,

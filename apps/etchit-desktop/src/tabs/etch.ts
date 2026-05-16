@@ -11,6 +11,7 @@ import {
   uploadTextViaWallet,
 } from "../wallet/externalUpload";
 import { loadWalletMode } from "../wallet/mode";
+import { isWalletReady, onReadinessChange } from "../wallet/readiness";
 
 type Mode = "text" | "file";
 
@@ -25,6 +26,7 @@ interface State {
   mode: Mode;
   picked: PickedItem[];
   status: "idle" | "etching";
+  walletReady: boolean;
 }
 
 export function mountEtch(host: HTMLElement): void {
@@ -66,7 +68,7 @@ export function mountEtch(host: HTMLElement): void {
     </div>
   `;
 
-  const state: State = { mode: "text", picked: [], status: "idle" };
+  const state: State = { mode: "text", picked: [], status: "idle", walletReady: true };
 
   const $ = <T extends HTMLElement>(sel: string): T => host.querySelector(sel) as T;
 
@@ -81,6 +83,14 @@ export function mountEtch(host: HTMLElement): void {
   const errorEl = $<HTMLDivElement>(".etch-error");
 
   mountActiveWalletBanner(bannerEl);
+  void isWalletReady().then((ready) => {
+    state.walletReady = ready;
+    refreshSubmit();
+  });
+  onReadinessChange((ready) => {
+    state.walletReady = ready;
+    refreshSubmit();
+  });
 
   const renderPicked = (): void => {
     pickedListEl.innerHTML = "";
@@ -179,12 +189,12 @@ export function mountEtch(host: HTMLElement): void {
       submitEl.textContent = "Etching…";
       return;
     }
-    submitEl.textContent = "Etch";
+    submitEl.textContent = state.walletReady ? "Etch" : "Set up wallet first";
     const noTitle = titleEl.value.trim().length === 0;
     const noContent = state.mode === "text"
       ? bodyEl.value.trim().length === 0
       : state.picked.length === 0;
-    submitEl.disabled = noTitle || noContent;
+    submitEl.disabled = noTitle || noContent || !state.walletReady;
   }
 
   function showResult(address: string, label: string): void {

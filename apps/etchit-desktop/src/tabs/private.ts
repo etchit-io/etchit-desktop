@@ -44,6 +44,7 @@ import {
   uploadPrivateViaWallet,
 } from "../wallet/externalPrivateUpload";
 import { loadWalletMode } from "../wallet/mode";
+import { isWalletReady, onReadinessChange } from "../wallet/readiness";
 
 interface InternalPrivateResult {
   data_map: string;
@@ -70,6 +71,7 @@ interface TabState {
   picked: PickedItem[];
   entries: PrivateEntry[];
   expanded: Set<string>;
+  walletReady: boolean;
 }
 
 export function mountPrivate(host: HTMLElement): void {
@@ -152,6 +154,14 @@ export function mountPrivate(host: HTMLElement): void {
   const libraryStatus = root.querySelector(".private-library-status") as HTMLElement;
 
   mountActiveWalletBanner(bannerEl);
+  void isWalletReady().then((ready) => {
+    state.walletReady = ready;
+    refreshSubmit();
+  });
+  onReadinessChange((ready) => {
+    state.walletReady = ready;
+    refreshSubmit();
+  });
 
   const state: TabState = {
     mode: "text",
@@ -159,6 +169,7 @@ export function mountPrivate(host: HTMLElement): void {
     picked: [],
     entries: [],
     expanded: new Set(),
+    walletReady: true,
   };
 
   const setMode = (m: Mode): void => {
@@ -180,11 +191,11 @@ export function mountPrivate(host: HTMLElement): void {
       submitEl.textContent = "Etching…";
       return;
     }
-    submitEl.textContent = "Etch privately";
+    submitEl.textContent = state.walletReady ? "Etch privately" : "Set up wallet first";
     const noTitle = titleEl.value.trim().length === 0;
     const noContent =
       state.mode === "text" ? bodyEl.value.trim().length === 0 : state.picked.length === 0;
-    submitEl.disabled = noTitle || noContent;
+    submitEl.disabled = noTitle || noContent || !state.walletReady;
   };
 
   bodyEl.addEventListener("input", refreshSubmit);
@@ -354,14 +365,19 @@ export function mountPrivate(host: HTMLElement): void {
     const previewKind: PreviewKind =
       kind === "text" ? "text" : detectPreviewKind(filename);
 
+    // Save As is only meaningful for file entries with a renderable
+    // preview (binary entries promote Save As into openBtn directly).
+    // We hold it back until the user opens the entry — until then the
+    // bytes live on the network as encrypted chunks, not on disk, so
+    // surfacing Save As upfront would falsely imply the file is
+    // already local.
+    const saveBtnApplicable = previewKind !== "binary" && kind === "file";
     if (previewKind === "binary") {
-      // No inline preview possible — promote Save As… to the
-      // primary action and hide the now-redundant secondary one.
       openBtn.textContent = "Save As…";
       saveBtn.hidden = true;
     } else {
       openBtn.textContent = "Open";
-      saveBtn.hidden = kind !== "file"; // text entries don't need a save button
+      saveBtn.hidden = !saveBtnApplicable || !state.expanded.has(entry.id);
     }
 
     if (state.expanded.has(entry.id) && previewKind !== "binary") {
@@ -379,11 +395,13 @@ export function mountPrivate(host: HTMLElement): void {
         state.expanded.delete(entry.id);
         content.hidden = true;
         content.replaceChildren();
+        if (saveBtnApplicable) saveBtn.hidden = true;
         return;
       }
       state.expanded.add(entry.id);
       content.hidden = false;
       content.textContent = "Decrypting…";
+      if (saveBtnApplicable) saveBtn.hidden = false;
       void renderPreview(entry, content, previewKind);
     });
 
