@@ -2831,6 +2831,27 @@ body[data-theme="light"] .site-edit-preview-etch { color: #fff; }
   border-color: var(--copper-bright);
 }
 .backup-modal-cancel:hover { border-color: var(--bone); }
+.backup-modal-confirm:disabled {
+  background: var(--ash);
+  border-color: var(--ash);
+  color: var(--ink);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.backup-modal-saved {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--bone);
+  user-select: none;
+}
+.backup-modal-saved input[type="checkbox"] {
+  accent-color: var(--copper);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
 
 /* ── Brand wordmark glyph ────────────────────────────────────────────
    Wrap the `>` in `fetch>it` or the `/` in `etch/it` in this span so

@@ -39,6 +39,10 @@ export function openPasswordModal(mode: PasswordModalMode): Promise<string | nul
           <input class="backup-modal-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" />
         </label>
         <button type="button" class="backup-modal-regen" hidden>Generate another</button>
+        <label class="backup-modal-saved" hidden>
+          <input class="backup-modal-saved-check" type="checkbox" />
+          <span>I&rsquo;ve saved this passphrase somewhere safe.</span>
+        </label>
         <div class="backup-modal-actions">
           <button type="button" class="backup-modal-cancel">Cancel</button>
           <button type="button" class="backup-modal-confirm"></button>
@@ -51,6 +55,8 @@ export function openPasswordModal(mode: PasswordModalMode): Promise<string | nul
     const warn = overlay.querySelector(".backup-modal-warn") as HTMLElement;
     const input = overlay.querySelector(".backup-modal-input") as HTMLInputElement;
     const regenBtn = overlay.querySelector(".backup-modal-regen") as HTMLButtonElement;
+    const savedLabel = overlay.querySelector(".backup-modal-saved") as HTMLLabelElement;
+    const savedCheck = overlay.querySelector(".backup-modal-saved-check") as HTMLInputElement;
     const confirmBtn = overlay.querySelector(".backup-modal-confirm") as HTMLButtonElement;
     const cancelBtn = overlay.querySelector(".backup-modal-cancel") as HTMLButtonElement;
     const closeBtn = overlay.querySelector(".backup-modal-close") as HTMLButtonElement;
@@ -62,7 +68,9 @@ export function openPasswordModal(mode: PasswordModalMode): Promise<string | nul
       warn.hidden = false;
       input.value = generatePassphrase();
       regenBtn.hidden = false;
+      savedLabel.hidden = false;
       confirmBtn.textContent = "Save & continue";
+      confirmBtn.disabled = true;
     } else {
       title.textContent = "Enter your private-etch passphrase";
       lede.textContent =
@@ -70,6 +78,7 @@ export function openPasswordModal(mode: PasswordModalMode): Promise<string | nul
       warn.hidden = true;
       input.value = "";
       regenBtn.hidden = true;
+      savedLabel.hidden = true;
       confirmBtn.textContent = "Unlock";
     }
 
@@ -85,15 +94,29 @@ export function openPasswordModal(mode: PasswordModalMode): Promise<string | nul
 
     regenBtn.addEventListener("click", () => {
       input.value = generatePassphrase();
+      // Force the user to re-confirm they've saved the new one.
+      if (mode === "create") {
+        savedCheck.checked = false;
+        confirmBtn.disabled = true;
+      }
       input.focus();
       input.select();
     });
+    if (mode === "create") {
+      savedCheck.addEventListener("change", () => {
+        confirmBtn.disabled = !savedCheck.checked || input.value.trim().length === 0;
+      });
+      input.addEventListener("input", () => {
+        confirmBtn.disabled = !savedCheck.checked || input.value.trim().length === 0;
+      });
+    }
     confirmBtn.addEventListener("click", () => {
       const v = input.value.trim();
       if (!v) {
         input.focus();
         return;
       }
+      if (mode === "create" && !savedCheck.checked) return;
       settle(v);
     });
     cancelBtn.addEventListener("click", () => settle(null));

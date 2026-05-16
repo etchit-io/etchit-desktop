@@ -19,6 +19,14 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+/** Fires whenever the keychain-backed passphrase is added, replaced,
+ *  or cleared. Listeners (e.g. Settings) re-read status on this. */
+export const PASSPHRASE_CHANGED_EVENT = "etchit:passphrase-changed";
+
+function announcePassphraseChange(): void {
+  window.dispatchEvent(new CustomEvent(PASSPHRASE_CHANGED_EVENT));
+}
+
 const PBKDF2_ITERATIONS = 600_000;
 const KEY_LEN_BYTES = 32;
 
@@ -42,15 +50,25 @@ export function setSessionPassword(password: string): void {
   // under the old password would AEAD-fail on the new one anyway,
   // so they'd evict themselves. Keeping them lets a user type the
   // same password back in mid-session without re-paying PBKDF2.
-  void invoke("store_private_passphrase", { passphrase: password }).catch(() => {});
+  void invoke("store_private_passphrase", { passphrase: password })
+    .catch((e) => {
+      // eslint-disable-next-line no-console
+      console.warn("[etchit] passphrase keychain write failed:", e);
+    })
+    .finally(() => announcePassphraseChange());
 }
 
 /** Forget the password and every cached derived key, in memory and
- *  in the OS keychain. The keychain delete is fire-and-forget. */
+ *  in the OS keychain. */
 export function clearPasswordSession(): void {
   sessionPassword = null;
   keyBySalt.clear();
-  void invoke("clear_private_passphrase").catch(() => {});
+  void invoke("clear_private_passphrase")
+    .catch((e) => {
+      // eslint-disable-next-line no-console
+      console.warn("[etchit] passphrase keychain delete failed:", e);
+    })
+    .finally(() => announcePassphraseChange());
 }
 
 let loadPromise: Promise<void> | null = null;

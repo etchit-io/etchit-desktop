@@ -2,7 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 
 import { normalizeSecretKey } from "../etch/secretKey";
-import { clearPasswordSession } from "../private/passwordSession";
+import {
+  clearPasswordSession,
+  PASSPHRASE_CHANGED_EVENT,
+} from "../private/passwordSession";
 import { applyTheme, loadTheme, type Theme } from "../theme/theme";
 import { formatErr } from "../util/error";
 import { KEYCHAIN_CHANGED_EVENT } from "../wallet/statusPill";
@@ -274,10 +277,14 @@ function mountPassphrase(host: HTMLElement): void {
     status.dataset.tone = "error";
   };
 
-  void invoke<boolean>("has_private_passphrase").then(
-    (present) => (present ? setStored() : setEmpty()),
-    (e) => setError(formatErr(e)),
-  );
+  const refresh = (): void => {
+    void invoke<boolean>("has_private_passphrase").then(
+      (present) => (present ? setStored() : setEmpty()),
+      (e) => setError(formatErr(e)),
+    );
+  };
+  refresh();
+  window.addEventListener(PASSPHRASE_CHANGED_EVENT, refresh);
 
   async function confirmClear(): Promise<boolean> {
     const msg = [
