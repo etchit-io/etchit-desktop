@@ -2921,3 +2921,91 @@ body[data-theme="light"] .site-edit-preview-etch { color: #fff; }
   0%, 100% { background: var(--copper); }
   50%      { background: var(--copper-bright); }
 }
+
+/* Resume-banner stack — surfaces any pending finalize so the user
+   can retry it. Sits at the top of the viewport beneath the
+   wallet-action banner (which only appears mid-signing); kept
+   muted (ash/line) since it's a "needs attention" affordance, not
+   the urgent "your wallet is waiting" tone. */
+.resume-banner-stack {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line);
+}
+.resume-banner-stack[hidden] { display: none; }
+.resume-banner-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  background: var(--bone);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+}
+.resume-banner-body {
+  flex: 1;
+  min-width: 0;
+}
+.resume-banner-headline {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+.resume-banner-headline strong {
+  font-weight: 600;
+  color: var(--copper);
+}
+.resume-banner-hint {
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  color: var(--ash);
+}
+.resume-banner-error {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  color: var(--copper);
+  font-family: "JetBrains Mono", monospace;
+}
+.resume-banner-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.resume-banner-resume,
+.resume-banner-discard {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--bone);
+  color: var(--ink);
+}
+.resume-banner-resume {
+  background: var(--copper);
+  color: var(--bone);
+  border-color: var(--copper);
+}
+.resume-banner-resume:hover:not(:disabled) {
+  background: var(--copper-bright);
+  border-color: var(--copper-bright);
+}
+.resume-banner-discard:hover:not(:disabled) {
+  background: var(--line);
+}
+.resume-banner-resume:disabled,
+.resume-banner-discard:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}

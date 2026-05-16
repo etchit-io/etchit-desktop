@@ -281,7 +281,7 @@ export function mountEtch(host: HTMLElement): void {
 
     if (state.mode === "text") {
       if (walletMode === "external") {
-        void uploadTextViaWallet(bodyEl.value, setStatus).then(
+        void uploadTextViaWallet(bodyEl.value, setStatus, label).then(
           (r) => done(r.address),
           (e) => fail(formatErr(e)),
         );
@@ -302,12 +302,12 @@ export function mountEtch(host: HTMLElement): void {
 
     if (walletMode === "external") {
       if (isBundle) {
-        void uploadFilesViaWallet(items.map((i) => i.path), setStatus).then(
+        void uploadFilesViaWallet(items.map((i) => i.path), setStatus, label).then(
           (r) => done(r.address),
           (e) => fail(formatErr(e)),
         );
       } else {
-        void uploadFileViaWallet(items[0].path, setStatus).then(
+        void uploadFileViaWallet(items[0].path, setStatus, label).then(
           (r) => done(r.address),
           (e) => fail(formatErr(e)),
         );

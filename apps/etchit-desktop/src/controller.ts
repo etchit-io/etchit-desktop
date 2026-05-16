@@ -1,5 +1,6 @@
 import { loadStoredPassword } from "./private/passwordSession";
 import { applyTheme, loadTheme } from "./theme/theme";
+import { mountResumeBanner } from "./ui/resumeBanner";
 import { mountTabBar } from "./ui/tabBar";
 import { TAB_IDS, type TabId } from "./types";
 import { mountEtch } from "./tabs/etch";
@@ -24,6 +25,7 @@ const MOUNTERS: Record<TabId, (host: HTMLElement) => void> = {
 export function init(): void {
   applyTheme(loadTheme());
   void loadStoredPassword();
+  mountResumeBanner();
 
   const tabBarHost = need<HTMLElement>("tab-bar");
   const stage = need<HTMLElement>("stage");

@@ -465,7 +465,11 @@ export function mountPrivate(host: HTMLElement): void {
       const body = bodyEl.value;
       const bodyBytes = new TextEncoder().encode(body);
       if (mode === "external") {
-        void uploadPrivateViaWallet(bodyBytes, setStatus).then(
+        void uploadPrivateViaWallet(bodyBytes, setStatus, {
+          label: localTitle,
+          sizeBytes: bodyBytes.length,
+          kind: "text",
+        }).then(
           (r) => {
             void persistAndShow({
               kind: "text",
@@ -516,9 +520,15 @@ export function mountPrivate(host: HTMLElement): void {
       : items[0].label;
 
     if (mode === "external") {
+      const meta = {
+        label: localTitle,
+        sizeBytes: totalSize,
+        kind: "file" as const,
+        originalFilename: filename,
+      };
       const promise = isBundle
-        ? uploadPrivateFilesViaWallet(items.map((i) => i.path), setStatus)
-        : uploadPrivateFileViaWallet(items[0].path, setStatus);
+        ? uploadPrivateFilesViaWallet(items.map((i) => i.path), setStatus, meta)
+        : uploadPrivateFileViaWallet(items[0].path, setStatus, meta);
       void promise.then(
         (r) => {
           void persistAndShow({

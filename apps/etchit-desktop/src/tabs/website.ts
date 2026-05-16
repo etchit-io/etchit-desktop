@@ -297,7 +297,10 @@ function renderComposer(
         previewEtchBtn.textContent = msg;
         etchBtn.textContent = msg;
       };
-      void uploadBytesViaWallet(new TextEncoder().encode(html), setStatus).then(
+      void uploadBytesViaWallet(new TextEncoder().encode(html), setStatus, {
+        label: siteLabel(composer.getState(), template),
+        historyKind: "site",
+      }).then(
         (r) => onAddress(r.address),
         onFail,
       );
