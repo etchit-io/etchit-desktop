@@ -2871,3 +2871,30 @@ body[data-theme="light"] .site-edit-preview-etch { color: #fff; }
 .brand-mark {
   color: var(--copper);
 }
+
+/* ── Wallet-action banner ──────────────────────────────────────────
+   Shown only while an external-signer transaction is waiting for the
+   user to approve in their wallet app. High-contrast and full-width
+   so the cue can't be missed when the mobile wallet didn't auto-pop. */
+.wallet-action-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: var(--copper);
+  color: var(--ink);
+  font-weight: 600;
+  text-align: center;
+  padding: 0.85rem 1.25rem;
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  animation: wallet-action-pulse 1.6s ease-in-out infinite;
+}
+.wallet-action-banner[hidden] { display: none; }
+
+@keyframes wallet-action-pulse {
+  0%, 100% { background: var(--copper); }
+  50%      { background: var(--copper-bright); }
+}

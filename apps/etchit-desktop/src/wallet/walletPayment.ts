@@ -13,6 +13,7 @@ import {
   SESSION_BUDGET_ATTO,
   VAULT_ADDRESS,
 } from "./constants";
+import { hideWalletActionBanner, showWalletActionBanner } from "./walletActionBanner";
 
 export interface PaymentDto {
   rewards_address: string;
@@ -64,7 +65,15 @@ export async function runWalletPayment(
     progress("Approve ANT spending in your wallet…");
     const approveAmount = SESSION_BUDGET_ATTO > totalAtto ? SESSION_BUDGET_ATTO : totalAtto;
     const approveData = erc20Iface.encodeFunctionData("approve", [VAULT_ADDRESS, approveAmount]);
-    const approveHash = await sendTx(provider, userAddress, ANT_TOKEN_ADDRESS, approveData);
+    showWalletActionBanner(
+      "Open your wallet app — approve ANT spending. etch/it is waiting on your signature.",
+    );
+    let approveHash: string;
+    try {
+      approveHash = await sendTx(provider, userAddress, ANT_TOKEN_ADDRESS, approveData);
+    } finally {
+      hideWalletActionBanner();
+    }
     progress(`Waiting for approval confirmation (${shortTx(approveHash)})…`);
     const receipt = await rpc.waitForTransaction(approveHash);
     if (receipt?.status !== 1) throw new Error(`ANT approve reverted (${approveHash}).`);
@@ -77,7 +86,15 @@ export async function runWalletPayment(
     withHex(p.quote_hash),
   ]);
   const payData = vaultIface.encodeFunctionData("payForQuotes", [vaultPayments]);
-  const payTxHash = await sendTx(provider, userAddress, VAULT_ADDRESS, payData);
+  showWalletActionBanner(
+    "Open your wallet app — sign the payment. etch/it is waiting on your signature.",
+  );
+  let payTxHash: string;
+  try {
+    payTxHash = await sendTx(provider, userAddress, VAULT_ADDRESS, payData);
+  } finally {
+    hideWalletActionBanner();
+  }
   progress(`Waiting for payment confirmation (${shortTx(payTxHash)})…`);
   const payReceipt = await rpc.waitForTransaction(payTxHash);
   if (payReceipt?.status !== 1) throw new Error(`payForQuotes reverted (${payTxHash}).`);
