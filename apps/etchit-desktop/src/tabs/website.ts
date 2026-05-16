@@ -246,10 +246,6 @@ function renderComposer(
 
   switchBtn.addEventListener("click", () => {
     void (async () => {
-      if (state.composer && state.composer.totalImageBytes() === 0 && !state.composer.isReady()) {
-        onSwitch();
-        return;
-      }
       const ok = await ask(
         "Switching templates discards what you've typed in this one. Continue?",
         { title: "Switch template", kind: "warning" },
