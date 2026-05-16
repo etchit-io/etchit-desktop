@@ -53,6 +53,16 @@ export async function getAppKit(): Promise<AppKitLike> {
   return cached;
 }
 
+/** Open the AppKit modal unconditionally. When a wallet is already
+ *  connected this shows the account-management sheet (chain switch,
+ *  disconnect, etc.); otherwise it shows the pairing flow. Use this
+ *  for an explicit "Manage" affordance — see `waitForConnection`
+ *  when you specifically want to await a successful pair. */
+export async function openAppKit(): Promise<void> {
+  const kit = await getAppKit();
+  await kit.open();
+}
+
 /** Open the modal and resolve when the user has paired a wallet. */
 export async function waitForConnection(): Promise<string> {
   const kit = await getAppKit();

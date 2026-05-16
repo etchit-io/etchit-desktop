@@ -18,6 +18,7 @@ import { formatErr } from "../util/error";
 import {
   currentAccount,
   onAccountChange,
+  openAppKit,
   waitForConnection,
 } from "../wallet/appkit";
 import { formatToken, shortHexAddress } from "../wallet/balance";
@@ -244,7 +245,7 @@ function paintExternalCard(host: HTMLElement, address: string): void {
     loadExternalBalance(host, address),
   );
   host.querySelector<HTMLButtonElement>(".wallet-manage")?.addEventListener("click", () => {
-    void waitForConnection().catch(() => {}); // re-opens modal when already connected
+    void openAppKit().catch(() => {});
   });
   loadExternalBalance(host, address);
 }
