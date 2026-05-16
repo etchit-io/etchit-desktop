@@ -2882,10 +2882,13 @@ body[data-theme="light"] .site-edit-preview-etch { color: #fff; }
   left: 0;
   right: 0;
   z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
   background: var(--copper);
   color: var(--ink);
   font-weight: 600;
-  text-align: center;
   padding: 0.85rem 1.25rem;
   font-size: 0.95rem;
   letter-spacing: 0.01em;
@@ -2893,6 +2896,26 @@ body[data-theme="light"] .site-edit-preview-etch { color: #fff; }
   animation: wallet-action-pulse 1.6s ease-in-out infinite;
 }
 .wallet-action-banner[hidden] { display: none; }
+.wallet-action-banner-msg {
+  text-align: center;
+}
+.wallet-action-banner-cancel {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  padding: 0.3rem 0.85rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.wallet-action-banner-cancel:hover {
+  background: var(--ink);
+  color: var(--copper);
+}
+.wallet-action-banner-cancel[hidden] { display: none; }
 
 @keyframes wallet-action-pulse {
   0%, 100% { background: var(--copper); }

@@ -65,12 +65,12 @@ export async function runWalletPayment(
     progress("Approve ANT spending in your wallet…");
     const approveAmount = SESSION_BUDGET_ATTO > totalAtto ? SESSION_BUDGET_ATTO : totalAtto;
     const approveData = erc20Iface.encodeFunctionData("approve", [VAULT_ADDRESS, approveAmount]);
-    showWalletActionBanner(
-      "Open your wallet app — approve ANT spending. etch/it is waiting on your signature.",
-    );
     let approveHash: string;
     try {
-      approveHash = await sendTx(provider, userAddress, ANT_TOKEN_ADDRESS, approveData);
+      approveHash = await waitForSignature(
+        sendTx(provider, userAddress, ANT_TOKEN_ADDRESS, approveData),
+        "Open your wallet app — approve ANT spending. etch/it is waiting on your signature.",
+      );
     } finally {
       hideWalletActionBanner();
     }
@@ -86,12 +86,12 @@ export async function runWalletPayment(
     withHex(p.quote_hash),
   ]);
   const payData = vaultIface.encodeFunctionData("payForQuotes", [vaultPayments]);
-  showWalletActionBanner(
-    "Open your wallet app — sign the payment. etch/it is waiting on your signature.",
-  );
   let payTxHash: string;
   try {
-    payTxHash = await sendTx(provider, userAddress, VAULT_ADDRESS, payData);
+    payTxHash = await waitForSignature(
+      sendTx(provider, userAddress, VAULT_ADDRESS, payData),
+      "Open your wallet app — sign the payment. etch/it is waiting on your signature.",
+    );
   } finally {
     hideWalletActionBanner();
   }
@@ -146,6 +146,42 @@ async function sendTx(
     method: "eth_sendTransaction",
     params: [{ from, to, data, value: "0x0" }],
   })) as string;
+}
+
+/** Pop the wallet-action banner with a Cancel button, race the
+ *  signature against a 120s timeout. Resolves with the tx hash,
+ *  rejects on user cancel, wallet rejection, or timeout. */
+async function waitForSignature(
+  txPromise: Promise<string>,
+  bannerMsg: string,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const settle = (fn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
+    const timeoutId = window.setTimeout(() => {
+      settle(() => reject(new Error("wallet signing timed out after 2 minutes")));
+    }, 120_000);
+    showWalletActionBanner(bannerMsg, () => {
+      settle(() => {
+        window.clearTimeout(timeoutId);
+        reject(new Error("Signing cancelled."));
+      });
+    });
+    txPromise.then(
+      (h) => settle(() => {
+        window.clearTimeout(timeoutId);
+        resolve(h);
+      }),
+      (e: unknown) => settle(() => {
+        window.clearTimeout(timeoutId);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }),
+    );
+  });
 }
 
 function withHex(s: string): string {
