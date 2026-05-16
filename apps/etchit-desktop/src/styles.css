@@ -645,6 +645,14 @@ body[data-theme="light"] .etch-submit { color: #fff; }
   letter-spacing: 0.08em;
   color: var(--copper);
 }
+.etch-result-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--bone);
+  word-break: break-word;
+}
+.etch-result-title:empty { display: none; }
 .etch-result-addr {
   display: block;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

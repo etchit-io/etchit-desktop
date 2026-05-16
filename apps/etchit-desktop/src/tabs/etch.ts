@@ -187,17 +187,19 @@ export function mountEtch(host: HTMLElement): void {
     submitEl.disabled = noTitle || noContent;
   }
 
-  function showResult(address: string): void {
+  function showResult(address: string, label: string): void {
     errorEl.hidden = true;
     resultEl.hidden = false;
     resultEl.innerHTML = `
       <p class="etch-result-headline">Etched.</p>
+      <p class="etch-result-title"></p>
       <code class="etch-result-addr"></code>
       <div class="etch-result-actions">
         <button type="button" class="etch-result-copy">Copy address</button>
         <button type="button" class="etch-result-open">Open in fetch<span class="brand-mark">&gt;</span>it</button>
       </div>
     `;
+    (resultEl.querySelector(".etch-result-title") as HTMLElement).textContent = label;
     (resultEl.querySelector(".etch-result-addr") as HTMLElement).textContent = address;
     (resultEl.querySelector(".etch-result-copy") as HTMLButtonElement).addEventListener("click", () => {
       void navigator.clipboard.writeText(address).catch(() => {});
@@ -264,7 +266,7 @@ export function mountEtch(host: HTMLElement): void {
       }
       titleEl.value = "";
       refreshSubmit();
-      showResult(address);
+      showResult(address, label);
     };
     const fail = (msg: string): void => {
       state.status = "idle";
