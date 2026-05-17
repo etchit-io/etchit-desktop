@@ -1,6 +1,6 @@
 [package]
 name = "etchit-desktop"
-version = "0.1.0"
+version = "0.2.5"
 description = "Desktop publisher for the Autonomi network. Companion to fetch>it desktop."
 authors = ["the etch/it contributors"]
 license = "AGPL-3.0-only"
@@ -47,16 +47,10 @@ sha2 = "0.10"
 # compression) keeps each inner file byte-identical to its original.
 zip = { version = "2", default-features = false }
 
-# Transitive pins — `ant-node = 0.11.1` (pulled in via `ant-ffi`) is
-# source-incompatible with `saorsa-core >= 0.24.3` (added a
-# `transport_source` field to `P2PEvent::Message` that breaks
-# ant-node's pattern match) and `saorsa-transport >= 0.34.2`. The
-# `ffi/rust/Cargo.lock` locks these to the working pair; we mirror
-# that here so etchit-desktop's resolver doesn't pick newer patch
-# versions on a fresh build. Drop these whenever the FFI bumps
-# ant-node to a release built against current saorsa.
-saorsa-core = "=0.24.2"
-saorsa-transport = "=0.34.1"
+# The earlier ant-node 0.11.1 → 0.11.3 bump rebuilt against current
+# saorsa, so the source-incompatibility workaround that pinned
+# saorsa-core = 0.24.2 / saorsa-transport = 0.34.1 is no longer
+# required. Cargo now resolves to the version ant-core 0.2.4 wants.
 
 [lints.rust]
 unsafe_code = "forbid"
