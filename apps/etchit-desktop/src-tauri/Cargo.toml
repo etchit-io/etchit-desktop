@@ -1,6 +1,6 @@
 [package]
 name = "etchit-desktop"
-version = "0.2.5"
+version = "0.2.6"
 description = "Desktop publisher for the Autonomi network. Companion to fetch>it desktop."
 authors = ["the etch/it contributors"]
 license = "AGPL-3.0-only"
