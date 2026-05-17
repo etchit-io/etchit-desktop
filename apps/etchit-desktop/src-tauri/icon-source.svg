@@ -1,0 +1,10 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Brand wordmark distilled to its glyph. Copper bg (#c9732b),
+       bone slash (#f5f2eb). Drawn as a rounded rect rather than
+       <text> so the raster step doesn't depend on a particular mono
+       font being installed. -->
+  <rect width="1024" height="1024" fill="#c9732b"/>
+  <g transform="translate(512 512) rotate(24)">
+    <rect x="-90" y="-360" width="180" height="720" rx="90" fill="#f5f2eb"/>
+  </g>
+</svg>
