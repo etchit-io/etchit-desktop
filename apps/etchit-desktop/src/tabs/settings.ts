@@ -6,6 +6,10 @@ import {
   clearPasswordSession,
   PASSPHRASE_CHANGED_EVENT,
 } from "../private/passwordSession";
+import {
+  isScreenshotWatchEnabled,
+  setScreenshotWatchEnabled,
+} from "../screenshot/settings";
 import { applyTheme, loadTheme, type Theme } from "../theme/theme";
 import { formatErr } from "../util/error";
 import { KEYCHAIN_CHANGED_EVENT } from "../wallet/statusPill";
@@ -53,6 +57,28 @@ export function mountSettings(host: HTMLElement): void {
           </p>
           <div class="settings-theme-options" role="radiogroup" aria-label="Theme"></div>
         </details>
+      </section>
+
+      <section class="settings-section">
+        <h2>Etch from clipboard</h2>
+        <p class="settings-desc">
+          When on, copying an image (or taking a screenshot &mdash;
+          most OS screenshot tools drop the capture straight into the
+          clipboard) pops a small toast asking if you want to etch it
+          publicly. One click and it&rsquo;s on the network.
+        </p>
+        <div class="settings-warn">
+          <p class="settings-warn-title">Public &mdash; not private.</p>
+          <p class="settings-warn-body">
+            The toast etches publicly. Once on the network, the bytes
+            stay there. If your clipboard might hold something
+            sensitive (passwords, IDs, work screens), leave this off.
+          </p>
+        </div>
+        <label class="settings-toggle">
+          <input type="checkbox" class="settings-clipboard-toggle" />
+          <span>Watch the clipboard for images</span>
+        </label>
       </section>
 
       <section class="settings-section">
@@ -147,8 +173,17 @@ export function mountSettings(host: HTMLElement): void {
   `;
 
   mountAppearance(host);
+  mountClipboardWatch(host);
   mountAdvanced(host);
   mountPassphrase(host);
+}
+
+function mountClipboardWatch(host: HTMLElement): void {
+  const toggle = host.querySelector(".settings-clipboard-toggle") as HTMLInputElement;
+  toggle.checked = isScreenshotWatchEnabled();
+  toggle.addEventListener("change", () => {
+    setScreenshotWatchEnabled(toggle.checked);
+  });
 }
 
 function mountAppearance(host: HTMLElement): void {

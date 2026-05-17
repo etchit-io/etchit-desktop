@@ -3068,3 +3068,142 @@ body[data-theme="light"] .site-edit-preview-etch { color: #fff; }
   opacity: 0.6;
   cursor: progress;
 }
+
+/* "Etch from clipboard" toggle in Settings. */
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+}
+.settings-toggle input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--copper);
+  cursor: pointer;
+}
+
+/* Bottom-right toast that appears when the clipboard watcher sees a
+ * new image. Same copper-on-bone palette as the resume banner. */
+.shot-toast {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 998;
+  display: flex;
+  gap: 0.8rem;
+  align-items: stretch;
+  max-width: 28rem;
+  padding: 0.8rem;
+  background: var(--bone);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+}
+.shot-toast[hidden] { display: none; }
+.shot-toast-preview {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--line);
+  flex-shrink: 0;
+}
+.shot-toast-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.shot-toast-headline {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.shot-toast-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--ash);
+}
+.shot-toast-address-row {
+  display: flex;
+  min-width: 0;
+}
+.shot-toast-address {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  color: var(--copper);
+  background: var(--line);
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+.shot-toast-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--copper);
+  font-family: "JetBrains Mono", monospace;
+  word-break: break-word;
+}
+.shot-toast-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+  flex-wrap: wrap;
+}
+.shot-toast-qr {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem;
+  background: var(--bone);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  margin-top: 0.25rem;
+}
+.shot-toast-qr svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.shot-toast-primary,
+.shot-toast-secondary {
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--bone);
+  color: var(--ink);
+}
+.shot-toast-primary {
+  background: var(--copper);
+  color: var(--bone);
+  border-color: var(--copper);
+}
+.shot-toast-primary:hover:not(:disabled) {
+  background: var(--copper-bright);
+  border-color: var(--copper-bright);
+}
+.shot-toast-secondary:hover:not(:disabled) {
+  background: var(--line);
+}
+.shot-toast-primary:disabled,
+.shot-toast-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

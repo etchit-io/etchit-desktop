@@ -1,6 +1,7 @@
 import { loadStoredPassword } from "./private/passwordSession";
 import { applyTheme, loadTheme } from "./theme/theme";
 import { mountResumeBanner } from "./ui/resumeBanner";
+import { mountScreenshotToast } from "./ui/screenshotToast";
 import { mountTabBar } from "./ui/tabBar";
 import { TAB_IDS, type TabId } from "./types";
 import { mountEtch } from "./tabs/etch";
@@ -26,6 +27,7 @@ export function init(): void {
   applyTheme(loadTheme());
   void loadStoredPassword();
   mountResumeBanner();
+  mountScreenshotToast();
 
   const tabBarHost = need<HTMLElement>("tab-bar");
   const stage = need<HTMLElement>("stage");

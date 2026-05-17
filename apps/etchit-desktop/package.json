@@ -15,8 +15,11 @@
     "@reown/appkit": "^1.8.19",
     "@reown/appkit-adapter-ethers": "^1.8.19",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.7.1",
-    "ethers": "^6.16.0"
+    "@tauri-apps/plugin-notification": "^2.3.3",
+    "ethers": "^6.16.0",
+    "qrcode-generator": "^2.0.4"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
