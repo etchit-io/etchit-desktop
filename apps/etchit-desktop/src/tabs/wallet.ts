@@ -66,6 +66,20 @@ export function mountWallet(host: HTMLElement): void {
 
       <section class="wallet-panel wallet-panel-internal" hidden></section>
       <section class="wallet-panel wallet-panel-external" hidden></section>
+
+      <section class="wallet-card wallet-support">
+        <h2>Support development</h2>
+        <p class="wallet-support-blurb">
+          etch<span class="brand-mark">/</span>it is open source and self-funded.
+          If it&rsquo;s been useful, you can send a tip to the address below
+          &mdash; any EVM chain.
+        </p>
+        <div class="settings-support-row">
+          <code class="settings-support-addr">0xC842451eC3454913585B885240e58aa5E4F4ed2b</code>
+          <button type="button" class="settings-support-copy">Copy address</button>
+        </div>
+        <p class="settings-support-status" role="status" aria-live="polite"></p>
+      </section>
     </div>
   `;
 
@@ -96,6 +110,27 @@ export function mountWallet(host: HTMLElement): void {
   window.addEventListener(WALLET_MODE_CHANGED_EVENT, activeModeListener);
 
   applyMode(loadWalletMode());
+  mountSupport(root);
+}
+
+function mountSupport(root: HTMLElement): void {
+  const addrEl = root.querySelector<HTMLElement>(".settings-support-addr");
+  const copyBtn = root.querySelector<HTMLButtonElement>(".settings-support-copy");
+  const status = root.querySelector<HTMLElement>(".settings-support-status");
+  if (!addrEl || !copyBtn || !status) return;
+  const address = addrEl.textContent?.trim() ?? "";
+  copyBtn.addEventListener("click", () => {
+    void (async () => {
+      try {
+        await navigator.clipboard.writeText(address);
+        status.textContent = "Address copied.";
+        status.dataset.tone = "ok";
+      } catch (e) {
+        status.textContent = formatErr(e);
+        status.dataset.tone = "error";
+      }
+    })();
+  });
 }
 
 function renderInternal(host: HTMLElement): void {
