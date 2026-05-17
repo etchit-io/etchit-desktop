@@ -434,6 +434,46 @@ code {
 }
 .settings-key-clear[hidden] { display: none; }
 
+.settings-support-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+.settings-support-addr {
+  font-size: 0.78rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  word-break: break-all;
+  user-select: all;
+}
+.settings-support-copy {
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--bone);
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.settings-support-copy:hover {
+  border-color: var(--copper);
+  color: var(--copper);
+}
+.settings-support-status {
+  margin: 0.6rem 0 0;
+  font-size: 0.82rem;
+  min-height: 1.1em;
+  color: var(--ash);
+}
+.settings-support-status[data-tone="ok"] { color: var(--copper); }
+.settings-support-status[data-tone="error"] { color: #ff7a7a; }
+
 .settings-key-status {
   margin: 0.75rem 0 0;
   font-size: 0.82rem;
