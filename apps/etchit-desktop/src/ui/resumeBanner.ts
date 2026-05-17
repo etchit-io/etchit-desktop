@@ -25,6 +25,13 @@ let stackEl: HTMLDivElement | null = null;
 const inFlight = new Set<string>();
 const errors = new Map<string, string>();
 
+// Happy-path finalizes usually return in <1 s — without a delay the
+// banner flashes onto the page and back off for every successful
+// etch, which reads as "something broke". Hold rendering of a pending
+// entry until it's been around long enough to genuinely look stuck.
+const SHOW_AFTER_MS = 4000;
+const showTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 /** Mount the global banner once. Idempotent. */
 export function mountResumeBanner(): void {
   if (stackEl) return;
@@ -42,14 +49,43 @@ export function mountResumeBanner(): void {
 
 function render(): void {
   if (!stackEl) return;
+  const now = Date.now();
   const pending = listPending();
-  stackEl.hidden = pending.length === 0;
-  stackEl.replaceChildren();
-  // Drop any cached errors for entries that are no longer pending.
-  for (const id of [...errors.keys()]) {
-    if (!pending.some((p) => p.id === id)) errors.delete(id);
+  const pendingIds = new Set(pending.map((p) => p.id));
+
+  // Cancel any pending-show timers for entries that have already
+  // resolved; clean their cached error state too.
+  for (const [id, timer] of showTimers) {
+    if (!pendingIds.has(id)) {
+      clearTimeout(timer);
+      showTimers.delete(id);
+    }
   }
+  for (const id of [...errors.keys()]) {
+    if (!pendingIds.has(id)) errors.delete(id);
+  }
+
+  // Only entries that have been pending long enough are visible.
+  // Schedule a re-render for any that are still inside the cool-down.
+  const visible: PendingEtch[] = [];
   for (const entry of pending) {
+    const age = now - entry.createdAt;
+    if (age >= SHOW_AFTER_MS) {
+      visible.push(entry);
+      continue;
+    }
+    if (!showTimers.has(entry.id)) {
+      const timer = setTimeout(() => {
+        showTimers.delete(entry.id);
+        render();
+      }, SHOW_AFTER_MS - age);
+      showTimers.set(entry.id, timer);
+    }
+  }
+
+  stackEl.hidden = visible.length === 0;
+  stackEl.replaceChildren();
+  for (const entry of visible) {
     stackEl.appendChild(rowFor(entry));
   }
 }
