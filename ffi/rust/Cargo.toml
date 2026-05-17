@@ -3,4 +3,4 @@ members = ["ant-ffi"]
 resolver = "2"
 
 [workspace.dependencies]
-uniffi = "0.29.4"
+uniffi = "=0.29.5"

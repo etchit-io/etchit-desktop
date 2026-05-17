@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { ask } from "@tauri-apps/plugin-dialog";
 
 import { normalizeSecretKey } from "../etch/secretKey";
@@ -157,6 +158,9 @@ export function mountSettings(host: HTMLElement): void {
         <details class="settings-collapsible">
           <summary><h2>About</h2></summary>
           <p class="settings-desc">
+            Version <code id="setting-version">&hellip;</code>
+          </p>
+          <p class="settings-desc">
             <strong>etch<span class="brand-mark">/</span>it &mdash; beta software.</strong>
             Dual-licensed under
             <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer">AGPL-3.0-only</a>
@@ -171,6 +175,13 @@ export function mountSettings(host: HTMLElement): void {
       </section>
     </div>
   `;
+
+  // Stamp the running version into the About section. Tauri reads it from
+  // src-tauri/tauri.conf.json so the field stays the single source of truth.
+  void getVersion().then((v) => {
+    const verEl = host.querySelector<HTMLElement>("#setting-version");
+    if (verEl) verEl.textContent = v;
+  });
 
   mountAppearance(host);
   mountClipboardWatch(host);
