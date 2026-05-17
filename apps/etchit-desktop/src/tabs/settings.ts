@@ -160,7 +160,7 @@ export function mountSettings(host: HTMLElement): void {
           <p class="settings-desc">
             etch<span class="brand-mark">/</span>it is open source and self-funded.
             If it&rsquo;s been useful, you can send a tip to the address below
-            &mdash; any EVM chain, any ERC-20 token (ETH and ANT on Arbitrum One both work).
+            &mdash; any EVM chain.
           </p>
           <div class="settings-support-row">
             <code class="settings-support-addr">0xC842451eC3454913585B885240e58aa5E4F4ed2b</code>
