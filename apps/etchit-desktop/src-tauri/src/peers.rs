@@ -102,13 +102,36 @@ fn clear_override(app: &AppHandle) -> Result<(), String> {
 /// `AppHandle`. Falls back to baked-in defaults if `register_app` hasn't
 /// run yet (only possible if a connect somehow races the setup hook,
 /// which Tauri's invoke_handler doesn't permit in practice).
+///
+/// Returned entries are normalised to full multiaddrs because
+/// `ant-ffi`'s `Client::connect` parses each string directly as
+/// `MultiAddr` — unlike `fetchit-net::AutonomiClient::connect`, which
+/// runs `parse_bootstrap_peer` first and auto-promotes `ip:port`
+/// shorthand. Without this, the bundled DEFAULT_PEERS list (kept as
+/// ip:port for parity with fetchit-net and the upstream toml) blows
+/// up the FFI with "Unknown address scheme '207.148.94.42:10000'."
 pub fn effective_peers() -> Vec<String> {
     let user = app().map(load_override).unwrap_or_default();
-    if user.is_empty() {
-        default_peers()
-    } else {
-        user
+    let raw = if user.is_empty() { default_peers() } else { user };
+    raw.iter().map(|s| normalize_for_ffi(s)).collect()
+}
+
+/// Promote an `ip:port` shorthand to a QUIC multiaddr the FFI accepts.
+/// Strings that already start with `/` are passed through unchanged
+/// (they're full multiaddrs); anything else that doesn't split cleanly
+/// into host:port is also passed through, so the FFI can surface its
+/// own clear "invalid multiaddr" error rather than us double-validating.
+fn normalize_for_ffi(addr: &str) -> String {
+    let trimmed = addr.trim();
+    if trimmed.starts_with('/') {
+        return trimmed.to_owned();
     }
+    if let Some((host, port)) = trimmed.rsplit_once(':') {
+        if !host.is_empty() && port.parse::<u16>().is_ok() {
+            return format!("/ip4/{host}/udp/{port}/quic");
+        }
+    }
+    trimmed.to_owned()
 }
 
 /// Validate one bootstrap-peer string. Accepts an `ip:port` shorthand
