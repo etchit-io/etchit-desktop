@@ -150,7 +150,7 @@ pub(crate) async fn get_or_build_external_client(
     if let Some(client) = guard.as_ref() {
         return Ok(client.clone());
     }
-    let client = Client::connect(Vec::new())
+    let client = Client::connect(crate::peers::effective_peers())
         .await
         .map_err(|e| format!("client init failed: {e}"))?;
     *guard = Some(client.clone());
@@ -168,7 +168,7 @@ pub(crate) async fn get_or_build_client(state: &EtchState) -> Result<Arc<Client>
     }
     // Either nothing cached or the user rotated the key — build fresh.
     let client = Client::connect_with_wallet(
-        Vec::new(),
+        crate::peers::effective_peers(),
         key,
         RPC_URL.to_string(),
         ANT_TOKEN_ADDRESS.to_string(),

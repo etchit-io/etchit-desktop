@@ -156,6 +156,30 @@ export function mountSettings(host: HTMLElement): void {
 
       <section class="settings-section">
         <details class="settings-collapsible">
+          <summary><h2>Bootstrap peers</h2></summary>
+          <p class="settings-desc">
+            The list of Autonomi peers etch<span class="brand-mark">/</span>it dials on the first etch.
+            Defaults to the bundled production list. One peer per line &mdash; either an
+            <code>ip:port</code> shorthand or a full
+            <code>/ip4/&hellip;/udp/&hellip;/quic</code> multiaddr. Refresh pulls
+            the latest list from
+            <a href="https://github.com/WithAutonomi/ant-node/blob/main/config/bootstrap_peers.toml" target="_blank" rel="noopener noreferrer">WithAutonomi&rsquo;s canonical file</a>.
+          </p>
+          <textarea class="settings-peers-editor" rows="6" spellcheck="false" aria-label="Bootstrap peers"></textarea>
+          <div class="settings-key-actions">
+            <button type="button" class="settings-peers-save">Save</button>
+            <button type="button" class="settings-peers-reset">Reset to defaults</button>
+            <button type="button" class="settings-peers-refresh">Refresh from upstream</button>
+          </div>
+          <p class="settings-peers-status" role="status" aria-live="polite"></p>
+          <p class="settings-desc settings-desc-muted">
+            Restart etch<span class="brand-mark">/</span>it after saving so the next etch reconnects with the new list.
+          </p>
+        </details>
+      </section>
+
+      <section class="settings-section">
+        <details class="settings-collapsible">
           <summary><h2>About</h2></summary>
           <p class="settings-desc">
             Version <code id="setting-version">&hellip;</code>
@@ -187,6 +211,96 @@ export function mountSettings(host: HTMLElement): void {
   mountClipboardWatch(host);
   mountAdvanced(host);
   mountPassphrase(host);
+  mountPeers(host);
+}
+
+interface RefreshResult {
+  peers: string[];
+  updated: boolean;
+}
+
+function mountPeers(host: HTMLElement): void {
+  const editor = host.querySelector<HTMLTextAreaElement>(".settings-peers-editor");
+  const saveBtn = host.querySelector<HTMLButtonElement>(".settings-peers-save");
+  const resetBtn = host.querySelector<HTMLButtonElement>(".settings-peers-reset");
+  const refreshBtn = host.querySelector<HTMLButtonElement>(".settings-peers-refresh");
+  const status = host.querySelector<HTMLElement>(".settings-peers-status");
+  if (!editor || !saveBtn || !resetBtn || !refreshBtn || !status) return;
+
+  const setStatus = (msg: string, tone: "ok" | "error" | "muted" = "muted"): void => {
+    status.textContent = msg;
+    status.dataset.tone = tone;
+  };
+
+  // Prefill: user override if set, otherwise bundled defaults so the
+  // user sees what they're replacing rather than starting blank.
+  const prefill = async (): Promise<void> => {
+    try {
+      const overrideList = await invoke<string[]>("peers_override_cmd");
+      if (overrideList.length > 0) {
+        editor.value = overrideList.join("\n");
+        return;
+      }
+      const defaults = await invoke<string[]>("default_peers_cmd");
+      editor.value = defaults.join("\n");
+    } catch {
+      editor.value = "";
+    }
+  };
+  void prefill();
+
+  saveBtn.addEventListener("click", () => {
+    const peers = editor.value
+      .split("\n")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (peers.length === 0) {
+      setStatus("At least one peer is required (or use Reset).", "error");
+      return;
+    }
+    saveBtn.disabled = true;
+    setStatus("Saving…");
+    void invoke<string[]>("set_peers_override_cmd", { peers })
+      .then((cleaned) => {
+        editor.value = cleaned.join("\n");
+        setStatus(`Saved (${cleaned.length} peer${cleaned.length === 1 ? "" : "s"}). Restart etch/it to reconnect.`, "ok");
+      })
+      .catch((e: unknown) => setStatus(formatErr(e), "error"))
+      .finally(() => {
+        saveBtn.disabled = false;
+      });
+  });
+
+  resetBtn.addEventListener("click", () => {
+    resetBtn.disabled = true;
+    setStatus("Resetting…");
+    void invoke("reset_peers_override_cmd")
+      .then(() => prefill())
+      .then(() => setStatus("Reset to bundled defaults. Restart etch/it to reconnect.", "ok"))
+      .catch((e: unknown) => setStatus(formatErr(e), "error"))
+      .finally(() => {
+        resetBtn.disabled = false;
+      });
+  });
+
+  refreshBtn.addEventListener("click", () => {
+    refreshBtn.disabled = true;
+    setStatus("Fetching latest peers from WithAutonomi…");
+    void invoke<RefreshResult>("refresh_peers_from_upstream_cmd")
+      .then((result) => {
+        editor.value = result.peers.join("\n");
+        setStatus(
+          result.updated
+            ? `Updated — ${result.peers.length} peer${result.peers.length === 1 ? "" : "s"} from upstream. Restart etch/it to reconnect.`
+            : `Already current — ${result.peers.length} peer${result.peers.length === 1 ? "" : "s"}, no change.`,
+          "ok",
+        );
+      })
+      .catch((e: unknown) => setStatus(formatErr(e), "error"))
+      .finally(() => {
+        refreshBtn.disabled = false;
+      });
+  });
 }
 
 function mountClipboardWatch(host: HTMLElement): void {

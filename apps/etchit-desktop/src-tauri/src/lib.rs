@@ -11,6 +11,7 @@ mod archive;
 mod blog;
 mod etch;
 mod history;
+mod peers;
 mod private_etch;
 mod private_store;
 mod secrets;
@@ -56,6 +57,13 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .manage(etch::EtchState::default())
+        .setup(|app| {
+            // Stash AppHandle so peers::effective_peers() can read the
+            // override file from etch.rs without threading AppHandle
+            // through every Tauri command + helper signature.
+            peers::register_app(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             archive::estimate_zip_size_command,
             etch::etch_file,
@@ -97,6 +105,11 @@ pub fn run() {
             private_store::private_load,
             private_store::private_append,
             private_store::private_delete,
+            peers::default_peers_cmd,
+            peers::peers_override_cmd,
+            peers::set_peers_override_cmd,
+            peers::reset_peers_override_cmd,
+            peers::refresh_peers_from_upstream_cmd,
             open_in_fetchit,
         ])
         .run(tauri::generate_context!())

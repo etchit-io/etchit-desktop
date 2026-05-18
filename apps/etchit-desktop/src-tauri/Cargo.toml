@@ -46,6 +46,13 @@ sha2 = "0.10"
 # cost one upload and one wallet payment. `Stored` mode (no
 # compression) keeps each inner file byte-identical to its original.
 zip = { version = "2", default-features = false }
+# Used only by peers::refresh_from_upstream to GET WithAutonomi's
+# canonical bootstrap_peers.toml. rustls-tls keeps us off the system
+# OpenSSL dep tree on Linux.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# Parse the upstream bootstrap_peers.toml. Small dep, robust against
+# WithAutonomi's exact TOML shape (peers = […], or [[peer]] tables).
+toml = "0.8"
 
 # The earlier ant-node 0.11.1 → 0.11.3 bump rebuilt against current
 # saorsa, so the source-incompatibility workaround that pinned
