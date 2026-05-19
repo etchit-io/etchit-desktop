@@ -88,6 +88,20 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS code-sign + notarize. tauri-action auto-detects these
+          # env vars and signs the .app with the Developer ID Application
+          # cert decoded from APPLE_CERTIFICATE, then notarizes with the
+          # app-specific password / team id triple. On non-macOS runners
+          # they're harmless no-ops.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Keychain password tauri-action uses for the temporary keychain
+          # it creates to import the cert. Doesn't need to match anything
+          # real — kept literal here so the env stays self-contained.
+          KEYCHAIN_PASSWORD: tauri-action-keychain
         with:
           projectPath: ./apps/etchit-desktop
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
