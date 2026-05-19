@@ -92,7 +92,7 @@ jobs:
           projectPath: ./apps/etchit-desktop
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseDraft: true
+          releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
 
