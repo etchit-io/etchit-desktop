@@ -11,6 +11,7 @@ import {
   isScreenshotWatchEnabled,
   setScreenshotWatchEnabled,
 } from "../screenshot/settings";
+import { getIdleTracker } from "../controller";
 import { applyTheme, loadTheme, type Theme } from "../theme/theme";
 import { formatErr } from "../util/error";
 import { KEYCHAIN_CHANGED_EVENT } from "../wallet/statusPill";
@@ -61,12 +62,34 @@ export function mountSettings(host: HTMLElement): void {
       </section>
 
       <section class="settings-section">
+        <h2>Network</h2>
+        <div class="settings-peers-row" aria-live="polite">
+          <span>Connected peers</span>
+          <span class="settings-peers-count-value" data-state="off">—</span>
+        </div>
+        <label class="settings-peers-row">
+          <span>Disconnect when idle</span>
+          <select class="settings-idle-timeout"></select>
+        </label>
+      </section>
+
+      <section class="settings-section">
+        <details class="settings-collapsible">
+          <summary><h2>Bootstrap peers</h2></summary>
+          <textarea class="settings-peers-editor" rows="6" spellcheck="false" aria-label="Bootstrap peers"></textarea>
+          <div class="settings-key-actions">
+            <button type="button" class="settings-peers-save">Save</button>
+            <button type="button" class="settings-peers-reset">Reset to defaults</button>
+            <button type="button" class="settings-peers-refresh">Refresh from upstream</button>
+          </div>
+          <p class="settings-peers-status" role="status" aria-live="polite"></p>
+        </details>
+      </section>
+
+      <section class="settings-section">
         <h2>Etch from clipboard</h2>
         <p class="settings-desc">
-          When on, copying an image (or taking a screenshot &mdash;
-          most OS screenshot tools drop the capture straight into the
-          clipboard) pops a small toast asking if you want to etch it
-          publicly. One click and it&rsquo;s on the network.
+          Pops a toast offering to etch any image you copy.
         </p>
         <div class="settings-warn">
           <p class="settings-warn-title">Public &mdash; not private.</p>
@@ -85,10 +108,8 @@ export function mountSettings(host: HTMLElement): void {
       <section class="settings-section">
         <h2>Advanced &mdash; wallet key</h2>
         <p class="settings-desc">
-          For etching without WalletConnect. Paste a hex private key and
-          etch<span class="brand-mark">/</span>it will use it to pay for uploads, storing it only in
-          your operating system&rsquo;s keychain &mdash; never on disk in
-          plaintext.
+          Private key for etching without WalletConnect. Stored in your
+          OS keychain, never on disk.
         </p>
         <div class="settings-warn">
           <p class="settings-warn-title">Use a dedicated upload wallet.</p>
@@ -156,44 +177,14 @@ export function mountSettings(host: HTMLElement): void {
 
       <section class="settings-section">
         <details class="settings-collapsible">
-          <summary><h2>Bootstrap peers</h2></summary>
-          <p class="settings-desc">
-            The list of Autonomi peers etch<span class="brand-mark">/</span>it dials on the first etch.
-            Defaults to the bundled production list. One peer per line &mdash; either an
-            <code>ip:port</code> shorthand or a full
-            <code>/ip4/&hellip;/udp/&hellip;/quic</code> multiaddr. Refresh pulls
-            the latest list from
-            <a href="https://github.com/WithAutonomi/ant-node/blob/main/config/bootstrap_peers.toml" target="_blank" rel="noopener noreferrer">WithAutonomi&rsquo;s canonical file</a>.
-          </p>
-          <textarea class="settings-peers-editor" rows="6" spellcheck="false" aria-label="Bootstrap peers"></textarea>
-          <div class="settings-key-actions">
-            <button type="button" class="settings-peers-save">Save</button>
-            <button type="button" class="settings-peers-reset">Reset to defaults</button>
-            <button type="button" class="settings-peers-refresh">Refresh from upstream</button>
-          </div>
-          <p class="settings-peers-status" role="status" aria-live="polite"></p>
-          <p class="settings-desc settings-desc-muted">
-            Restart etch<span class="brand-mark">/</span>it after saving so the next etch reconnects with the new list.
-          </p>
-        </details>
-      </section>
-
-      <section class="settings-section">
-        <details class="settings-collapsible">
           <summary><h2>About</h2></summary>
           <p class="settings-desc">
             Version <code id="setting-version">&hellip;</code>
           </p>
           <p class="settings-desc">
             <strong>etch<span class="brand-mark">/</span>it &mdash; beta software.</strong>
-            Dual-licensed under
             <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer">AGPL-3.0-only</a>
-            and a separate commercial license (see <code>COMMERCIAL.md</code>). Provided
-            <em>&ldquo;AS IS&rdquo; without warranty of any kind</em>; see sections
-            15 &amp; 16 of the AGPL for the full disclaimer.
-          </p>
-          <p class="settings-desc settings-desc-muted">
-            Companion reader: <strong>fetch<span class="brand-mark">&gt;</span>it</strong>.
+            or commercial (<code>COMMERCIAL.md</code>). Provided <em>"AS IS"</em>, no warranty.
           </p>
         </details>
       </section>
@@ -208,10 +199,63 @@ export function mountSettings(host: HTMLElement): void {
   });
 
   mountAppearance(host);
+  mountNetwork(host);
   mountClipboardWatch(host);
   mountAdvanced(host);
   mountPassphrase(host);
   mountPeers(host);
+}
+
+interface IdlePolicy {
+  timeoutMinutes: number;
+}
+
+const IDLE_CHOICES: { value: number; label: string }[] = [
+  { value: 0, label: "Never" },
+  { value: 5, label: "After 5 minutes" },
+  { value: 15, label: "After 15 minutes" },
+  { value: 30, label: "After 30 minutes (default)" },
+  { value: 60, label: "After 1 hour" },
+  { value: 240, label: "After 4 hours" },
+];
+
+function mountNetwork(host: HTMLElement): void {
+  const countEl = host.querySelector<HTMLElement>(".settings-peers-count-value");
+  const idleSelect = host.querySelector<HTMLSelectElement>(".settings-idle-timeout");
+  if (!countEl || !idleSelect) return;
+
+  const refresh = async (): Promise<void> => {
+    try {
+      const n = await invoke<number>("peer_count");
+      countEl.textContent = String(n);
+      countEl.dataset.state = n > 0 ? "on" : "off";
+    } catch {
+      countEl.textContent = "—";
+      countEl.dataset.state = "off";
+    }
+  };
+  void refresh();
+  window.setInterval(refresh, 5_000);
+
+  for (const choice of IDLE_CHOICES) {
+    const opt = document.createElement("option");
+    opt.value = String(choice.value);
+    opt.textContent = choice.label;
+    idleSelect.appendChild(opt);
+  }
+  void invoke<IdlePolicy>("idle_policy")
+    .then((p) => {
+      idleSelect.value = String(p.timeoutMinutes);
+    })
+    .catch(() => {
+      idleSelect.value = "30";
+    });
+  idleSelect.addEventListener("change", () => {
+    const minutes = Math.max(0, Number(idleSelect.value) || 0);
+    void invoke("set_idle_policy", { policy: { timeoutMinutes: minutes } })
+      .then(() => getIdleTracker()?.setTimeoutMinutes(minutes))
+      .catch(() => {});
+  });
 }
 
 interface RefreshResult {
@@ -263,7 +307,7 @@ function mountPeers(host: HTMLElement): void {
     void invoke<string[]>("set_peers_override_cmd", { peers })
       .then((cleaned) => {
         editor.value = cleaned.join("\n");
-        setStatus(`Saved (${cleaned.length} peer${cleaned.length === 1 ? "" : "s"}). Restart etch/it to reconnect.`, "ok");
+        setStatus(`Saved · ${cleaned.length} peer${cleaned.length === 1 ? "" : "s"}`, "ok");
       })
       .catch((e: unknown) => setStatus(formatErr(e), "error"))
       .finally(() => {
@@ -276,7 +320,7 @@ function mountPeers(host: HTMLElement): void {
     setStatus("Resetting…");
     void invoke("reset_peers_override_cmd")
       .then(() => prefill())
-      .then(() => setStatus("Reset to bundled defaults. Restart etch/it to reconnect.", "ok"))
+      .then(() => setStatus("Reset to defaults", "ok"))
       .catch((e: unknown) => setStatus(formatErr(e), "error"))
       .finally(() => {
         resetBtn.disabled = false;
@@ -285,14 +329,13 @@ function mountPeers(host: HTMLElement): void {
 
   refreshBtn.addEventListener("click", () => {
     refreshBtn.disabled = true;
-    setStatus("Fetching latest peers from WithAutonomi…");
+    setStatus("Fetching…");
     void invoke<RefreshResult>("refresh_peers_from_upstream_cmd")
       .then((result) => {
         editor.value = result.peers.join("\n");
+        const n = result.peers.length;
         setStatus(
-          result.updated
-            ? `Updated — ${result.peers.length} peer${result.peers.length === 1 ? "" : "s"} from upstream. Restart etch/it to reconnect.`
-            : `Already current — ${result.peers.length} peer${result.peers.length === 1 ? "" : "s"}, no change.`,
+          result.updated ? `Updated · ${n} peer${n === 1 ? "" : "s"}` : `Already current · ${n} peer${n === 1 ? "" : "s"}`,
           "ok",
         );
       })

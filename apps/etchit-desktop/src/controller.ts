@@ -1,5 +1,8 @@
+import { invoke } from "@tauri-apps/api/core";
+
 import { loadStoredPassword } from "./private/passwordSession";
 import { applyTheme, loadTheme } from "./theme/theme";
+import { mountQrModal, type QrModalApi } from "./ui/qrModal";
 import { mountResumeBanner } from "./ui/resumeBanner";
 import { mountScreenshotToast } from "./ui/screenshotToast";
 import { mountTabBar } from "./ui/tabBar";
@@ -11,7 +14,27 @@ import { mountWebsite } from "./tabs/website";
 import { mountHistory } from "./tabs/history";
 import { mountWallet } from "./tabs/wallet";
 import { mountSettings } from "./tabs/settings";
+import { startIdleTracker, type IdleTracker } from "./util/idle";
 import { mountWalletPill } from "./wallet/statusPill";
+
+interface IdlePolicy {
+  timeoutMinutes: number;
+}
+
+// Single tracker shared with Settings → Network so toggling the
+// dropdown calls `setTimeoutMinutes` on the same instance.
+let idleTracker: IdleTracker | null = null;
+export function getIdleTracker(): IdleTracker | null {
+  return idleTracker;
+}
+
+// Lazy reference to the QR-share modal so any tab can open it via
+// `getQrModal()?.open(address)` without threading the api through
+// every mount function.
+let qrModal: QrModalApi | null = null;
+export function getQrModal(): QrModalApi | null {
+  return qrModal;
+}
 
 const MOUNTERS: Record<TabId, (host: HTMLElement) => void> = {
   etch: mountEtch,
@@ -28,6 +51,16 @@ export function init(): void {
   void loadStoredPassword();
   mountResumeBanner();
   mountScreenshotToast();
+  qrModal = mountQrModal(need<HTMLElement>("qr-modal"));
+
+  // Idle tracker — disconnects the cached FFI client after the
+  // configured timeout of no user activity. Hydrates from the
+  // persisted policy on first paint; the Settings select updates
+  // it live via `getIdleTracker()`.
+  idleTracker = startIdleTracker();
+  void invoke<IdlePolicy>("idle_policy")
+    .then((p) => idleTracker?.setTimeoutMinutes(p.timeoutMinutes))
+    .catch(() => {});
 
   const tabBarHost = need<HTMLElement>("tab-bar");
   const stage = need<HTMLElement>("stage");

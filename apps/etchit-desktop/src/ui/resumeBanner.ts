@@ -15,6 +15,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { formatErr } from "../util/error";
 import {
   clearPending,
+  isFinalizing,
   listPending,
   onPendingChange,
   type PendingEtch,
@@ -24,13 +25,6 @@ import {
 let stackEl: HTMLDivElement | null = null;
 const inFlight = new Set<string>();
 const errors = new Map<string, string>();
-
-// Happy-path finalizes usually return in <1 s — without a delay the
-// banner flashes onto the page and back off for every successful
-// etch, which reads as "something broke". Hold rendering of a pending
-// entry until it's been around long enough to genuinely look stuck.
-const SHOW_AFTER_MS = 4000;
-const showTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /** Mount the global banner once. Idempotent. */
 export function mountResumeBanner(): void {
@@ -49,39 +43,19 @@ export function mountResumeBanner(): void {
 
 function render(): void {
   if (!stackEl) return;
-  const now = Date.now();
   const pending = listPending();
   const pendingIds = new Set(pending.map((p) => p.id));
 
-  // Cancel any pending-show timers for entries that have already
-  // resolved; clean their cached error state too.
-  for (const [id, timer] of showTimers) {
-    if (!pendingIds.has(id)) {
-      clearTimeout(timer);
-      showTimers.delete(id);
-    }
-  }
+  // Drop cached errors for entries that have been cleared.
   for (const id of [...errors.keys()]) {
     if (!pendingIds.has(id)) errors.delete(id);
   }
 
-  // Only entries that have been pending long enough are visible.
-  // Schedule a re-render for any that are still inside the cool-down.
-  const visible: PendingEtch[] = [];
-  for (const entry of pending) {
-    const age = now - entry.createdAt;
-    if (age >= SHOW_AFTER_MS) {
-      visible.push(entry);
-      continue;
-    }
-    if (!showTimers.has(entry.id)) {
-      const timer = setTimeout(() => {
-        showTimers.delete(entry.id);
-        render();
-      }, SHOW_AFTER_MS - age);
-      showTimers.set(entry.id, timer);
-    }
-  }
+  // Hide entries whose finalize is still in flight — the screenshot
+  // toast / etch tab is already showing progress for those. Only
+  // reveal once the finalize Promise has rejected (markFinalizeFailed)
+  // or the user has explicitly retried.
+  const visible = pending.filter((p) => !isFinalizing(p.id));
 
   stackEl.hidden = visible.length === 0;
   stackEl.replaceChildren();

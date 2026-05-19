@@ -15,6 +15,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import {
   clearPending,
+  markFinalizeFailed,
   newPendingId,
   savePending,
 } from "./pendingEtches";
@@ -138,10 +139,16 @@ async function runPrivatePipeline(
   });
 
   progress("Finalizing upload — pushing chunks to the network…");
-  const result = await invoke<{ chunks_stored: number }>("finalize_private_etch", {
-    uploadId: prepared.upload_id,
-    txHashes: txHashMap(prepared.payments, payTxHash),
-  });
+  let result: { chunks_stored: number };
+  try {
+    result = await invoke<{ chunks_stored: number }>("finalize_private_etch", {
+      uploadId: prepared.upload_id,
+      txHashes: txHashMap(prepared.payments, payTxHash),
+    });
+  } catch (e) {
+    markFinalizeFailed(pendingId);
+    throw e;
+  }
   clearPending(pendingId);
   return {
     dataMap: prepared.data_map,

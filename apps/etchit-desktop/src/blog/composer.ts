@@ -1,5 +1,28 @@
+import { invoke } from "@tauri-apps/api/core";
+
+import { bindFileDropSlot } from "../util/dragDrop";
 import type { EditorState, ImageValue, Slot, SlotValue, Template } from "./types";
 import { processImage } from "./imageProcessor";
+
+const IMAGE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  avif: "image/avif",
+  heic: "image/heic",
+  svg: "image/svg+xml",
+  bmp: "image/bmp",
+};
+
+async function fileFromPath(path: string): Promise<File> {
+  const bytes = await invoke<number[]>("read_file_bytes", { path });
+  const name = path.split(/[\\/]/).pop() ?? "image";
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  const mime = IMAGE_MIME[ext] ?? "application/octet-stream";
+  return new File([new Uint8Array(bytes)], name, { type: mime });
+}
 
 export interface ComposerHandle {
   getState(): EditorState;
@@ -234,16 +257,22 @@ function wireImageSlot(
   });
   clearBtn.addEventListener("click", () => set(null));
 
-  drop.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    drop.classList.add("is-over");
-  });
-  drop.addEventListener("dragleave", () => drop.classList.remove("is-over"));
-  drop.addEventListener("drop", (e) => {
-    e.preventDefault();
-    drop.classList.remove("is-over");
-    const f = e.dataTransfer?.files?.[0];
-    if (f) void onFile(f);
+  // Tauri intercepts OS-level file drops before the WebView's HTML5
+  // dragover/drop ever fires — pull paths off Tauri's event instead
+  // and round-trip through the backend read_file_bytes command to
+  // reconstruct a File the existing onFile / processImage flow expects.
+  bindFileDropSlot(drop, (paths) => {
+    const path = paths[0];
+    if (!path) return;
+    void (async () => {
+      try {
+        const file = await fileFromPath(path);
+        await onFile(file);
+      } catch (e) {
+        console.error("[blog] drop read failed:", e);
+        showEmpty();
+      }
+    })();
   });
 }
 

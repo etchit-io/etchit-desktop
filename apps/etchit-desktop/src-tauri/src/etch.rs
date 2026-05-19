@@ -59,6 +59,32 @@ pub struct EtchState {
     pub(crate) external: Mutex<Option<Arc<Client>>>,
 }
 
+impl EtchState {
+    /// Drop both cached FFI clients. Used by the idle-disconnect path
+    /// after the JS-side tracker fires; `ant-core` shuts down the
+    /// underlying node when the `Arc<Client>` ref count hits zero.
+    pub async fn drop_clients(&self) {
+        *self.cached.lock().await = None;
+        *self.external.lock().await = None;
+    }
+}
+
+/// Current bootstrap peer count from whichever Client is cached
+/// (external preferred — it's the read-side instance that the UI
+/// always builds first; cached/wallet falls back). Zero when no
+/// connect has happened yet. Cheap — just reads a counter the FFI
+/// keeps in its `Client` struct.
+#[tauri::command]
+pub async fn peer_count(state: tauri::State<'_, EtchState>) -> Result<u64, String> {
+    if let Some(c) = state.external.lock().await.as_ref() {
+        return Ok(c.peer_count().await);
+    }
+    if let Some((c, _)) = state.cached.lock().await.as_ref() {
+        return Ok(c.peer_count().await);
+    }
+    Ok(0)
+}
+
 /// Upload raw text bytes as public data. The caller (frontend) keeps
 /// any title or other metadata locally — the bytes on the network are
 /// exactly what the user typed.

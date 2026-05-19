@@ -14,6 +14,7 @@ import {
 } from "../history/store";
 import { kindLabel, relativeTime, shortAddress } from "../history/format";
 import { formatErr } from "../util/error";
+import { getQrModal } from "../controller";
 
 interface TabState {
   entries: HistoryEntry[];
@@ -90,6 +91,7 @@ export function mountHistory(host: HTMLElement): void {
       </div>
       <div class="history-row-actions">
         <button type="button" class="history-row-copy" title="Copy address">Copy</button>
+        <button type="button" class="history-row-qr" title="Share QR">QR</button>
         <button type="button" class="history-row-open" title="Open in fetchit">Open</button>
         <button type="button" class="history-row-delete" title="Remove from history" aria-label="Remove from history">×</button>
       </div>
@@ -106,6 +108,12 @@ export function mountHistory(host: HTMLElement): void {
         () => flashStatus("Address copied."),
         () => flashStatus("Couldn't copy to clipboard."),
       );
+    });
+    (li.querySelector(".history-row-qr") as HTMLButtonElement).addEventListener("click", () => {
+      // Pre-fill with the stored label so the share card carries the
+      // same title the user filed under in history. They can still
+      // override in the modal before exporting.
+      getQrModal()?.open(entry.address, entry.label);
     });
     (li.querySelector(".history-row-open") as HTMLButtonElement).addEventListener("click", () => {
       void invoke("open_in_fetchit", { address: entry.address }).catch((e: unknown) => {

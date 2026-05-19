@@ -30,6 +30,26 @@ export type OnImage = (image: ClipboardImage) => void;
 
 const POLL_MS = 3000;
 
+// When etchit itself writes an image to the clipboard (e.g. the QR
+// share modal's "Copy image" action), the next poll would naively see
+// a new image and trigger an "etch this image?" prompt for the user's
+// own QR card. We expose this short-lived suppression so the writer
+// can mark "expect a self-write in the next few seconds, ignore it."
+// After the window expires, normal polling resumes; the freshly
+// suppressed image becomes the watcher's `lastFingerprint` on the
+// next tick so genuinely-new screenshots still surface.
+let suppressUntilMs = 0;
+
+/**
+ * Tell the watcher to skip clipboard reads for the next `ttlMs`. Used
+ * by code paths that put an image on the clipboard on purpose. Default
+ * window is generous (8s) because the watcher only polls every
+ * `POLL_MS` (3s) and we want to cover at least one full cycle.
+ */
+export function suppressNextClipboardImage(ttlMs = 8000): void {
+  suppressUntilMs = Date.now() + ttlMs;
+}
+
 /** Pure dedupe key. Exported for unit testing. Width + height + length
  *  + 16 bytes from each end of the buffer is enough to distinguish
  *  distinct captures without hashing megabytes on every poll. */
@@ -57,6 +77,21 @@ export function startScreenshotWatcher(onImage: OnImage): () => void {
 
   const tick = async (): Promise<void> => {
     if (!isScreenshotWatchEnabled()) return;
+    // Skip when a self-write is expected on the clipboard (e.g. QR
+    // share modal's Copy image). We still pull the current fingerprint
+    // so subsequent polls dedupe against it — otherwise the moment the
+    // suppression window expires, the watcher would discover the
+    // self-write as a "new" image.
+    if (Date.now() < suppressUntilMs) {
+      try {
+        const img = await readImage();
+        const [rgba, size] = await Promise.all([img.rgba(), img.size()]);
+        lastFingerprint = fingerprintRgba(rgba, size.width, size.height);
+      } catch {
+        // Clipboard empty / unsupported — leave lastFingerprint alone.
+      }
+      return;
+    }
     try {
       const img = await readImage();
       const [rgba, size] = await Promise.all([img.rgba(), img.size()]);

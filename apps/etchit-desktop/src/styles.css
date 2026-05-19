@@ -434,6 +434,56 @@ code {
 }
 .settings-key-clear[hidden] { display: none; }
 
+.settings-peers-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--bone);
+}
+.settings-peers-row > span { flex: 1; }
+.settings-peers-count-value {
+  font-weight: 600;
+  font-size: 15px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--signal-ok);
+  min-width: 28px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.settings-peers-count-value[data-state="off"] { color: var(--ash); }
+.settings-peers-row select {
+  background: var(--ink);
+  color: var(--bone);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  min-width: 200px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23c9732b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M2.5 4.5L6 8l3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
+  padding-right: 32px;
+}
+.settings-peers-row select:focus {
+  outline: none;
+  border-color: var(--copper);
+}
+.settings-peers-row select option {
+  background: var(--ink);
+  color: var(--bone);
+}
+
 .settings-peers-editor {
   width: 100%;
   min-height: 7rem;
@@ -805,6 +855,7 @@ body[data-theme="light"] .etch-submit { color: #fff; }
 .etch-result-actions {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 .etch-result-actions button {
   background: transparent;
@@ -3261,6 +3312,22 @@ body[data-theme="light"] .site-edit-preview-etch { color: #fff; }
   margin-top: 0.25rem;
   flex-wrap: wrap;
 }
+.shot-toast-qr-title {
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bone);
+  color: var(--ink);
+  margin-top: 0.25rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+.shot-toast-qr-title:focus {
+  outline: none;
+  border-color: var(--copper);
+}
 .shot-toast-qr {
   display: flex;
   justify-content: center;
@@ -3304,4 +3371,166 @@ body[data-theme="light"] .site-edit-preview-etch { color: #fff; }
 .shot-toast-secondary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* ── Share-QR modal ─────────────────────────────────────────────── */
+/* Standard QR-share modal used across the suite. Mirrors fetch>it
+ * desktop's layout — bare QR + center copper chevron, address row,
+ * 2x2 button grid, footer pointing at the reader app. */
+.qr-modal-host[hidden] { display: none; }
+.qr-modal-host {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.qr-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(26, 24, 20, 0.55);
+  backdrop-filter: blur(2px);
+}
+.qr-modal-card {
+  position: relative;
+  background: var(--bone);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem 1.5rem;
+  width: min(420px, 92vw);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+}
+.qr-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+.qr-modal-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+}
+.qr-modal-brand {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.qr-modal-brand-chev {
+  color: var(--copper);
+  margin: 0 0.05em;
+}
+.qr-modal-close {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ash);
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.qr-modal-close:hover {
+  border-color: var(--copper);
+  color: var(--copper);
+}
+.qr-modal-qr {
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+}
+.qr-modal-qr svg {
+  width: 100%;
+  max-width: 280px;
+  height: auto;
+}
+.qr-modal-title-input {
+  display: block;
+  width: 100%;
+  margin: 0.7rem 0 0.15rem;
+  padding: 0.5rem 0.6rem;
+  text-align: center;
+  font-family: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.1rem;
+  line-height: 1.2;
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px dashed var(--ash);
+  border-radius: 4px;
+  outline: none;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.qr-modal-title-input::placeholder {
+  color: var(--ash);
+  font-style: italic;
+  opacity: 1;
+}
+.qr-modal-title-input:hover {
+  border-color: var(--copper);
+}
+.qr-modal-title-input:focus {
+  border-style: solid;
+  border-color: var(--copper);
+  background: rgba(255, 255, 255, 0.5);
+}
+.qr-modal-addr {
+  margin: 0.35rem 0 0.75rem;
+  text-align: center;
+}
+.qr-modal-addr code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--ash);
+  white-space: nowrap;
+  user-select: text;
+}
+.qr-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.qr-modal-actions button {
+  flex: 1 1 calc(50% - 0.25rem);
+  background: transparent;
+  color: var(--bone);
+  border: 1px solid var(--copper);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.85rem;
+  background-color: var(--copper);
+}
+.qr-modal-actions button:hover {
+  background-color: var(--copper-bright);
+  border-color: var(--copper-bright);
+}
+.qr-modal-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.qr-modal-footer {
+  margin: 0.85rem 0 0;
+  font-size: 0.72rem;
+  color: var(--ash);
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+.qr-modal-domain {
+  color: var(--copper);
+  font-weight: 600;
 }

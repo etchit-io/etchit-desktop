@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   clearPending,
+  isFinalizing,
   listPending,
+  markFinalizeFailed,
   newPendingId,
   onPendingChange,
   type PendingEtch,
@@ -122,6 +124,52 @@ describe("pendingEtches store", () => {
     unsub();
     savePending(makeEntry());
     expect(count).toBe(1);
+  });
+
+  it("savePending starts entries as finalizing (banner hides them)", () => {
+    const entry = makeEntry();
+    savePending(entry);
+    expect(isFinalizing(entry.id)).toBe(true);
+  });
+
+  it("markFinalizeFailed reveals the entry to the banner", () => {
+    const entry = makeEntry();
+    savePending(entry);
+    markFinalizeFailed(entry.id);
+    expect(isFinalizing(entry.id)).toBe(false);
+    expect(listPending().map((e) => e.id)).toContain(entry.id);
+  });
+
+  it("markFinalizeFailed dispatches a change event", () => {
+    const entry = makeEntry();
+    savePending(entry);
+    return new Promise<void>((resolve) => {
+      const handler = (): void => {
+        window.removeEventListener(PENDING_CHANGED_EVENT, handler);
+        resolve();
+      };
+      window.addEventListener(PENDING_CHANGED_EVENT, handler);
+      markFinalizeFailed(entry.id);
+    });
+  });
+
+  it("markFinalizeFailed is idempotent on unknown ids", () => {
+    let fired = false;
+    const handler = (): void => {
+      fired = true;
+    };
+    window.addEventListener(PENDING_CHANGED_EVENT, handler);
+    markFinalizeFailed("never-existed");
+    window.removeEventListener(PENDING_CHANGED_EVENT, handler);
+    expect(fired).toBe(false);
+  });
+
+  it("clearPending also clears finalizing state", () => {
+    const entry = makeEntry();
+    savePending(entry);
+    expect(isFinalizing(entry.id)).toBe(true);
+    clearPending(entry.id);
+    expect(isFinalizing(entry.id)).toBe(false);
   });
 
   it("carries the private flow shape (dataMap + meta)", () => {

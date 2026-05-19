@@ -67,18 +67,15 @@ export function mountWallet(host: HTMLElement): void {
       <section class="wallet-panel wallet-panel-internal" hidden></section>
       <section class="wallet-panel wallet-panel-external" hidden></section>
 
-      <section class="wallet-card wallet-support">
-        <h2>Support development</h2>
-        <p class="wallet-support-blurb">
-          etch<span class="brand-mark">/</span>it is open source and self-funded.
-          If it&rsquo;s been useful, you can send a tip to the address below
-          &mdash; any EVM chain.
-        </p>
-        <div class="settings-support-row">
-          <code class="settings-support-addr">0xC842451eC3454913585B885240e58aa5E4F4ed2b</code>
-          <button type="button" class="settings-support-copy">Copy address</button>
-        </div>
-        <p class="settings-support-status" role="status" aria-live="polite"></p>
+      <section class="settings-section wallet-support">
+        <details class="settings-collapsible">
+          <summary><h2>Support development</h2></summary>
+          <div class="settings-support-row">
+            <code class="settings-support-addr">0xC842451eC3454913585B885240e58aa5E4F4ed2b</code>
+            <button type="button" class="settings-support-copy">Copy address</button>
+          </div>
+          <p class="settings-support-status" role="status" aria-live="polite"></p>
+        </details>
       </section>
     </div>
   `;

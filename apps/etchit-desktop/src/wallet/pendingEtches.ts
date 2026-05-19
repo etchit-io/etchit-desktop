@@ -69,21 +69,46 @@ export interface PendingEtch {
 }
 
 const entries = new Map<string, PendingEtch>();
+// Entries whose finalize is currently in flight (first attempt or
+// retry). The Resume banner ignores these so users don't see
+// "Unfinished etch — Resume" while their upload is actively pushing
+// chunks. `markFinalizeFailed` flips the entry out of the set when
+// the finalize Promise rejects, which is the moment the banner
+// should become visible.
+const finalizing = new Set<string>();
 
 /** Generate a unique id for a new pending record. */
 export function newPendingId(): string {
   return crypto.randomUUID();
 }
 
-/** Add (or overwrite) a pending record. */
+/** Add (or overwrite) a pending record. New entries start in the
+ *  "finalizing" state — call `markFinalizeFailed` if the finalize
+ *  Promise rejects so the banner reveals the record. */
 export function savePending(entry: PendingEtch): void {
   entries.set(entry.id, entry);
+  finalizing.add(entry.id);
   emit();
 }
 
 /** Remove a pending record. Idempotent. */
 export function clearPending(id: string): void {
-  if (entries.delete(id)) emit();
+  const had = entries.delete(id);
+  finalizing.delete(id);
+  if (had) emit();
+}
+
+/** Mark an entry as no-longer-finalizing — i.e. the finalize Promise
+ *  rejected, so the banner should reveal it. Idempotent. */
+export function markFinalizeFailed(id: string): void {
+  if (finalizing.delete(id)) emit();
+}
+
+/** True while the entry's finalize is in flight (banner should hide
+ *  it). False once `markFinalizeFailed` is called or the entry is
+ *  unknown. */
+export function isFinalizing(id: string): boolean {
+  return finalizing.has(id);
 }
 
 /** Newest first. */

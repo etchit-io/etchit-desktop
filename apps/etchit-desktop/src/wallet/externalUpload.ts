@@ -14,6 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import {
   clearPending,
+  markFinalizeFailed,
   newPendingId,
   savePending,
   type PendingFlow,
@@ -144,10 +145,18 @@ async function runPipeline(
   }
 
   progress("Finalizing upload — pushing chunks to the network…");
-  const result = await invoke<PublicEtchResult>("finalize_public_etch", {
-    uploadId: prepared.upload_id,
-    txHashes: txHashMap(prepared.payments, payTxHash),
-  });
+  let result: PublicEtchResult;
+  try {
+    result = await invoke<PublicEtchResult>("finalize_public_etch", {
+      uploadId: prepared.upload_id,
+      txHashes: txHashMap(prepared.payments, payTxHash),
+    });
+  } catch (e) {
+    // Reveal the pending entry so the resume banner picks it up —
+    // it stayed hidden while finalize was in flight.
+    if (pendingId) markFinalizeFailed(pendingId);
+    throw e;
+  }
   if (pendingId) clearPending(pendingId);
   return {
     address: result.address,

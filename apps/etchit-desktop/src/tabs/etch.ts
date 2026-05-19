@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
+import { getQrModal } from "../controller";
 import { historyAppendBestEffort } from "../history/store";
 import { bindFileDropZone } from "../util/dragDrop";
 import { formatErr } from "../util/error";
@@ -206,6 +207,7 @@ export function mountEtch(host: HTMLElement): void {
       <code class="etch-result-addr"></code>
       <div class="etch-result-actions">
         <button type="button" class="etch-result-copy">Copy address</button>
+        <button type="button" class="etch-result-qr">Share QR</button>
         <button type="button" class="etch-result-open">Open in fetch<span class="brand-mark">&gt;</span>it</button>
       </div>
     `;
@@ -214,6 +216,9 @@ export function mountEtch(host: HTMLElement): void {
     (resultEl.querySelector(".etch-result-copy") as HTMLButtonElement).addEventListener("click", () => {
       void navigator.clipboard.writeText(address).catch(() => {});
       flash(resultEl.querySelector(".etch-result-copy") as HTMLButtonElement, "Copied!");
+    });
+    (resultEl.querySelector(".etch-result-qr") as HTMLButtonElement).addEventListener("click", () => {
+      getQrModal()?.open(address, label);
     });
     (resultEl.querySelector(".etch-result-open") as HTMLButtonElement).addEventListener("click", () => {
       void invoke("open_in_fetchit", { address }).catch((e: unknown) => {

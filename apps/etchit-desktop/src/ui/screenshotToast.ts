@@ -8,8 +8,13 @@
 //
 // Lifecycle:
 //   * watcher fingerprints the rgba; identical bytes don't re-fire
-//   * dismissed fingerprints are remembered until process exit so the
-//     same image won't keep nagging
+//   * dismissed fingerprints persist to disk via a Tauri command
+//     across restarts so the same screenshot sitting in the clipboard
+//     won't keep nagging across sessions. Bounded ring buffer so the
+//     store can't grow unbounded over time. We avoid `localStorage`
+//     here because WebKit2GTK flushes localStorage asynchronously and
+//     the user's typical "click Dismiss → close window" flow happens
+//     well before that flush, so the write is lost.
 //   * if a new image arrives while an upload is in flight, the toast
 //     waits — we don't drop user work mid-payment
 
@@ -28,7 +33,7 @@ import { formatErr } from "../util/error";
 import { uploadBytesViaWallet } from "../wallet/externalUpload";
 import { isWalletReady, onReadinessChange } from "../wallet/readiness";
 import { historyAppendBestEffort } from "../history/store";
-import { renderQrSvg } from "../qr";
+import { getQrModal } from "../controller";
 
 interface PromptState {
   kind: "prompt";
@@ -52,7 +57,6 @@ interface SuccessState {
   previewUrl: string;
   filename: string;
   address: string;
-  qrOpen: boolean;
 }
 
 interface ErrorState {
@@ -69,7 +73,44 @@ type ToastState = PromptState | BusyState | SuccessState | ErrorState;
 let toastEl: HTMLDivElement | null = null;
 let state: ToastState | null = null;
 let walletReady = false;
+const DISMISSED_LIMIT = 256;
+
 const dismissed = new Set<string>();
+let dismissedLoaded = false;
+
+async function loadDismissed(): Promise<void> {
+  try {
+    const list = await invoke<string[]>("screenshot_dismissed_load");
+    if (Array.isArray(list)) {
+      for (const f of list) if (typeof f === "string") dismissed.add(f);
+    }
+  } catch {
+    // Backend command missing (older app) or filesystem error — start
+    // fresh in-memory. New dismissals will still attempt to persist.
+  } finally {
+    dismissedLoaded = true;
+  }
+}
+
+function rememberDismissed(fingerprint: string): void {
+  dismissed.add(fingerprint);
+  // Trim to the most-recent N — Set iteration order is insertion order
+  // in ES2015+, so the tail slice keeps the freshest entries.
+  if (dismissed.size > DISMISSED_LIMIT) {
+    const arr = Array.from(dismissed).slice(-DISMISSED_LIMIT);
+    dismissed.clear();
+    for (const f of arr) dismissed.add(f);
+  }
+  // Fire-and-forget Rust-side write. The command writes synchronously
+  // from JS's point of view (no flush delay) — even if the user closes
+  // the window milliseconds later, the file is already on disk.
+  void invoke("screenshot_dismissed_save", {
+    fingerprints: Array.from(dismissed),
+  }).catch(() => {
+    // Disk error / command missing — the in-memory set still suppresses
+    // this session; we'll re-attempt on the next dismissal.
+  });
+}
 
 /** Mount once. Idempotent. */
 export function mountScreenshotToast(): void {
@@ -89,12 +130,21 @@ export function mountScreenshotToast(): void {
     walletReady = ready;
   });
 
+  // Hydrate the dismissed set from disk before the watcher fires.
+  // `onNewImage` also guards on `dismissedLoaded`, so the watcher can
+  // start before this resolves without surfacing a stale toast.
+  void loadDismissed();
+
   startScreenshotWatcher((image) => {
     void onNewImage(image);
   });
 }
 
 async function onNewImage(image: ClipboardImage): Promise<void> {
+  // Hold off until the persisted dismissed set has been loaded — the
+  // app launch racing the clipboard watcher would otherwise re-prompt
+  // for a fingerprint we already know to suppress.
+  if (!dismissedLoaded) return;
   if (dismissed.has(image.fingerprint)) return;
   if (!walletReady) return;
   if (state && (state.kind === "busy" || state.kind === "prompt")) return;
@@ -108,6 +158,14 @@ async function onNewImage(image: ClipboardImage): Promise<void> {
       previewUrl,
       filename: defaultFilename(),
     };
+    // Persist the fingerprint the moment we *show* the toast, not on
+    // the explicit Dismiss click. Closing the app, alt-tabbing, or
+    // ignoring the toast should all count as "I've seen this and
+    // didn't want it" — otherwise the same screenshot sitting in the
+    // clipboard re-prompts on every launch, which is what users were
+    // complaining about. To revisit a missed prompt the user must
+    // capture a fresh image (different bytes → different fingerprint).
+    rememberDismissed(image.fingerprint);
     render();
     // Only ping the OS when etch/it isn't focused. If the user is
     // already looking at us, the in-window toast is enough.
@@ -201,7 +259,6 @@ function render(): void {
     case "success":
       body.appendChild(headline("Etched"));
       body.appendChild(addressLine(state.address));
-      if (state.qrOpen) body.appendChild(qrPanel(state.address));
       body.appendChild(successActions(state));
       break;
     case "error":
@@ -256,7 +313,7 @@ function promptActions(s: PromptState): HTMLDivElement {
 
   const dismissBtn = button("Dismiss", "shot-toast-secondary");
   dismissBtn.addEventListener("click", () => {
-    dismissed.add(s.image.fingerprint);
+    rememberDismissed(s.image.fingerprint);
     URL.revokeObjectURL(s.previewUrl);
     state = null;
     if (toastEl) {
@@ -288,11 +345,9 @@ function successActions(s: SuccessState): HTMLDivElement {
       });
   });
 
-  const qrBtn = button(s.qrOpen ? "Hide QR" : "Show QR", "shot-toast-secondary");
+  const qrBtn = button("Share QR", "shot-toast-secondary");
   qrBtn.addEventListener("click", () => {
-    if (state?.kind !== "success") return;
-    state = { ...state, qrOpen: !state.qrOpen };
-    render();
+    getQrModal()?.open(s.address, s.filename);
   });
 
   const openBtn = brandedButton(
@@ -320,18 +375,6 @@ function successActions(s: SuccessState): HTMLDivElement {
   return actions;
 }
 
-function qrPanel(address: string): HTMLDivElement {
-  const panel = document.createElement("div");
-  panel.className = "shot-toast-qr";
-  panel.appendChild(
-    renderQrSvg(`autonomi://${address}`, {
-      cellSize: 4,
-      errorCorrectionLevel: "M",
-    }),
-  );
-  return panel;
-}
-
 function errorActions(s: ErrorState): HTMLDivElement {
   const actions = document.createElement("div");
   actions.className = "shot-toast-actions";
@@ -349,7 +392,7 @@ function errorActions(s: ErrorState): HTMLDivElement {
 
   const dismissBtn = button("Dismiss", "shot-toast-secondary");
   dismissBtn.addEventListener("click", () => {
-    dismissed.add(s.image.fingerprint);
+    rememberDismissed(s.image.fingerprint);
     URL.revokeObjectURL(s.previewUrl);
     state = null;
     if (toastEl) {
@@ -403,14 +446,13 @@ async function runUpload(s: PromptState): Promise<void> {
       { label: s.filename, historyKind: "file" },
     );
     historyAppendBestEffort(result.address, s.filename, "file", result.chunksStored);
-    dismissed.add(s.image.fingerprint);
+    rememberDismissed(s.image.fingerprint);
     state = {
       kind: "success",
       image: s.image,
       previewUrl: s.previewUrl,
       filename: s.filename,
       address: result.address,
-      qrOpen: false,
     };
     render();
   } catch (e) {

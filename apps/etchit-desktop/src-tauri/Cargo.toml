@@ -1,6 +1,6 @@
 [package]
 name = "etchit-desktop"
-version = "0.2.9"
+version = "0.2.17"
 description = "Desktop publisher for the Autonomi network. Companion to fetch>it desktop."
 authors = ["the etch/it contributors"]
 license = "AGPL-3.0-only"
@@ -20,6 +20,10 @@ tauri-plugin-dialog = "2"
 # fires when the user copies an image (or takes a screenshot that
 # lands in the clipboard). Opt-in; gated by a Settings toggle.
 tauri-plugin-clipboard-manager = "2"
+# PNG → RGBA decode for `copy_png_to_clipboard`. Tauri's clipboard plugin
+# takes RGBA bytes, not encoded PNG, so we decode here. `png` is the
+# minimal crate that does it — no JPEG / GIF / TIFF baggage.
+png = "0.17"
 # OS-native notifications — pings the user that a fresh clipboard
 # image is waiting to be etched even when etch/it isn't focused.
 tauri-plugin-notification = "2"
