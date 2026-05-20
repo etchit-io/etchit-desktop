@@ -36,7 +36,12 @@ jobs:
             # default and we don't ship a Fedora user yet.
             args: '--bundles deb,appimage'
           - platform: macos-latest
-            args: '--bundles dmg'
+            # universal-apple-darwin produces a fat binary (arm64 +
+            # x86_64) so the one .dmg runs natively on both Apple
+            # Silicon and Intel Macs. Without it, macos-latest (an
+            # Apple Silicon runner) builds an arm64-only bundle that
+            # won't launch on Intel.
+            args: '--target universal-apple-darwin --bundles dmg'
           - platform: windows-latest
             args: '--bundles msi'
     runs-on: ${{ matrix.platform }}
@@ -55,6 +60,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: '1.94.1'
+          # Both Mac targets so the universal build can lipo a fat
+          # binary in one pass. Empty on Linux/Windows legs.
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
@@ -114,10 +122,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: etchit-desktop-${{ runner.os }}
+          # The macOS dmg lands under target/universal-apple-darwin/
+          # because the build passes an explicit --target; the other
+          # platforms build for the host triple and stay under
+          # target/release/.
           path: |
             apps/etchit-desktop/src-tauri/target/release/bundle/deb/*.deb
             apps/etchit-desktop/src-tauri/target/release/bundle/appimage/*.AppImage
-            apps/etchit-desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            apps/etchit-desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             apps/etchit-desktop/src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: warn
           retention-days: 14
